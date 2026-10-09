@@ -1,0 +1,272 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum ModuleChoice {
+  LOGBOOK
+  PROJECT
+  BOTH
+}
+
+enum LogbookEntrySource {
+  MANUAL
+  AI_SINGLE_DAY
+  AI_BULK
+}
+
+enum EntryStatus {
+  DRAFT
+  REVIEWED
+  FINALIZED
+}
+
+enum ChapterMode {
+  MANUAL
+  AI_BULK
+}
+
+enum ProjectStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ReferenceSourceType {
+  JOURNAL_ARTICLE
+  CONFERENCE_PAPER
+  BOOK
+  DATASET
+  THESIS
+  REPORT
+  STANDARD
+  WEBSITE
+}
+
+enum VerificationTier {
+  API_VERIFIED
+  LINK_CHECKED
+  STUDENT_CONFIRMED
+}
+
+enum PurchaseProductType {
+  IT_SIWES_PASS
+  PROJECT_PASS
+  BUNDLE
+}
+
+enum PurchaseStatus {
+  PENDING
+  SUCCESSFUL
+  FAILED
+}
+
+enum GenerationType {
+  EXTRACTION
+  BULK_LOGBOOK
+  CHAPTER_DRAFT
+  SINGLE_DAY_POLISH
+}
+
+// ---------- Core ----------
+
+model User {
+  id           String   @id @default(uuid())
+  fullName     String
+  email        String   @unique
+  passwordHash String
+  school       String?
+  department   String?
+  moduleChoice ModuleChoice?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  itPlacement ITPlacement?
+  projects    Project[]
+  purchases   Purchase[]
+  generationLogs GenerationLog[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@map("users")
+}
+
+// ---------- Password recovery ----------
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // The raw token is emailed once and never stored. A database leak must not
+  // hand out working reset links, so only the digest is persisted.
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model Purchase {
+  id          String              @id @default(uuid())
+  userId      String
+  user        User                @relation(fields: [userId], references: [id])
+  productType PurchaseProductType
+  amountKobo  Int // store in kobo to avoid float issues, e.g. 500000 = ₦5,000
+  paymentRef  String              @unique
+  status      PurchaseStatus      @default(PENDING)
+  purchasedAt DateTime            @default(now())
+
+  @@map("purchases")
+}
+
+// ---------- IT/SIWES Logbook ----------
+
+model ITPlacement {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id])
+  companyName         String
+  companyAddress      String?
+  industrySector      String?
+  startDate           DateTime
+  endDate             DateTime
+  daysPerWeek         Int?
+  attendancePattern   String[] // e.g. ["mon","wed","thu","fri"]
+  trialWeekUsed       Boolean  @default(false)
+  createdAt           DateTime @default(now())
+
+  attendanceCalendar AttendanceCalendarDay[]
+  bulkFillupRequests BulkFillupRequest[]
+
+  @@map("it_placements")
+}
+
+model PublicHoliday {
+  id   String   @id @default(uuid())
+  date DateTime
+  name String
+  year Int
+
+  @@unique([date, name])
+  @@map("public_holidays")
+}
+
+model AttendanceCalendarDay {
+  id               String      @id @default(uuid())
+  placementId      String
+  placement        ITPlacement @relation(fields: [placementId], references: [id])
+  date             DateTime
+  isAttendanceDay  Boolean // derived from the pattern
+  isPublicHoliday  Boolean     @default(false)
+  holidayName      String?
+  confirmedAttended Boolean?   // null until the student answers, for holiday or manually-flagged dates
+  hasLogbookEntry  Boolean     @default(false)
+
+  logbookEntry LogbookEntry?
+
+  @@unique([placementId, date])
+  @@map("attendance_calendar_days")
+}
+
+model BulkFillupRequest {
+  id                  String      @id @default(uuid())
+  placementId         String
+  placement           ITPlacement @relation(fields: [placementId], references: [id])
+  rawInputText         String
+  extractedSchool      String?
+  extractedStartDate   DateTime?
+  extractedEndDate     DateTime?
+  extractedSkills      String[]
+  regenerationsUsed    Int         @default(0)
+  createdAt            DateTime    @default(now())
+
+  @@map("bulk_fillup_requests")
+}
+
+model LogbookEntry {
+  id               String                 @id @default(uuid())
+  calendarDayId    String                 @unique
+  calendarDay      AttendanceCalendarDay  @relation(fields: [calendarDayId], references: [id])
+  activity         String
+  evidenceUrl      String?
+  source           LogbookEntrySource     @default(MANUAL)
+  status           EntryStatus            @default(DRAFT)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@map("logbook_entries")
+}
+
+// ---------- Final Year Project ----------
+
+model Project {
+  id           String        @id @default(uuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  title        String
+  supervisorName String?
+  topicSource  String?       // manual | bank | ai_suggested
+  status       ProjectStatus @default(IN_PROGRESS)
+  completedAt  DateTime?
+  createdAt    DateTime      @default(now())
+
+  chapters   ProjectChapter[]
+  references ProjectReference[]
+
+  @@map("projects")
+}
+
+model ProjectChapter {
+  id              String      @id @default(uuid())
+  projectId       String
+  project         Project     @relation(fields: [projectId], references: [id])
+  chapterNumber   Int
+  title           String
+  mode            ChapterMode @default(MANUAL)
+  rawInputText    String?
+  content         String?
+  status          EntryStatus @default(DRAFT)
+  isFreeUnlocked  Boolean     @default(false) // true only for chapterNumber 1
+  regenerationsUsed Int       @default(0)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@unique([projectId, chapterNumber])
+  @@map("project_chapters")
+}
+
+model ProjectReference {
+  id                String              @id @default(uuid())
+  projectId         String
+  project           Project             @relation(fields: [projectId], references: [id])
+  citationText      String
+  sourceType        ReferenceSourceType
+  doiOrIsbnOrLink   String?
+  formattedCitation String?
+  isVerified        Boolean             @default(false)
+  verificationTier  VerificationTier    @default(STUDENT_CONFIRMED)
+  verifiedVia       String? // e.g. "crossref", "datacite", "openlibrary"
+  createdAt         DateTime            @default(now())
+
+  @@map("project_references")
+}
+
+// ---------- Cost tracking ----------
+
+model GenerationLog {
+  id              String         @id @default(uuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id])
+  type            GenerationType
+  estimatedTokens Int?
+  estimatedCostKobo Int?
+  createdAt       DateTime       @default(now())
+
+  @@map("generation_logs")
+}
