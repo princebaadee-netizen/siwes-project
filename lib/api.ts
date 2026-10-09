@@ -77,6 +77,18 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
 
+  forgotPassword: (email: string) =>
+    request<{ ok: boolean; message: string; devResetUrl?: string }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, password: string) =>
+    request<{ ok: boolean }>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
+
   getMe: () => request<any>("/users/me"),
 
   updateMe: (data: { fullName?: string; school?: string; department?: string; moduleChoice?: "LOGBOOK" | "PROJECT" | "BOTH" }) =>

@@ -81,6 +81,14 @@ export default function LoginPage() {
               placeholder="Your password"
             />
           </div>
+          <div className="flex justify-end">
+            <Link
+              href="/forgot-password"
+              className="focus-ring text-sm font-medium text-forest underline decoration-forest/30 underline-offset-4"
+            >
+              Forgot password?
+            </Link>
+          </div>
         </div>
 
         {error && (

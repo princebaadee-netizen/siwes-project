@@ -12,6 +12,7 @@
     "db:generate": "npm --prefix backend run prisma:generate",
     "db:migrate": "npm --prefix backend run prisma:migrate",
     "db:seed": "npm --prefix backend run prisma:seed",
+    "test:api": "npm --prefix backend test",
     "typecheck:api": "npm --prefix backend run build"
   },
   "dependencies": {

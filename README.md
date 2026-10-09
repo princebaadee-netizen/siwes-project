@@ -15,8 +15,17 @@ npm run dev                            # starts API (:4001) + web (:3000) togeth
 
 Then open http://localhost:3000 — it'll route you into onboarding automatically. `npm run dev` runs both halves; you don't need to start the backend separately.
 
+## Tests
+
+Backend unit tests (Jest + ts-jest; no database or network needed):
+
+```bash
+npm run test:api        # runs `npm test` in backend/
+```
+
 ## What's built
 
+- **Auth** — sign up, sign in, and a **forgot-password** flow (`/forgot-password` → `/reset-password`) that emails a one-hour, single-use reset link. With no mail provider configured the link is written to the backend console, so the flow is testable locally.
 - **`/onboarding`** — module choice → profile → **account (email/password — creates a real account)** → IT placement details → attendance pattern (day-count + constrained day-picker) → project topic (if chosen) → review. Clicking "Go to dashboard" now actually calls the backend: signup → save profile → create IT placement (which generates the holiday-aware calendar server-side) → create project (which auto-generates the 5 chapters). Local `localStorage` state is still kept as a working cache/draft while filling the form, matching the plan's "offline continuity" design.
 - **`/dashboard`** — tabbed side navigation shell.
   - **Overview**: fetches real chapter-completion and logbook progress from the backend.
@@ -37,6 +46,8 @@ app/
   layout.tsx              — fonts + global providers
   page.tsx                — routes to /onboarding or /dashboard based on saved state
   login/page.tsx          — real login screen (email/password → JWT)
+  forgot-password/page.tsx — request a reset link by email
+  reset-password/page.tsx  — set a new password from the emailed token
   onboarding/page.tsx      — the wizard, now calling the real backend on finish
   dashboard/
     layout.tsx             — tabbed side nav shell

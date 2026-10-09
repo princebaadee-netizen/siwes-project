@@ -37,6 +37,17 @@ npm run start:dev
 
 Server runs on **http://localhost:4001** (set by `PORT` in `.env`, which the frontend's `/api` proxy reads). Health check: `GET /health`.
 
+## Tests
+
+Unit tests run with Jest + ts-jest:
+
+```bash
+npm test            # or: npm run test:api   (from the repo root)
+npm run test:watch
+```
+
+They target the places where a regression would be costly or silent — price resolution and the naira→kobo conversion (`pricing.spec.ts`), the password-reset flow including token expiry, single-use and email-enumeration safety (`auth.service.spec.ts`), and the mail sender's provider/no-provider paths (`mail.service.spec.ts`). No database or network is needed: Prisma, the mail provider and the token store are mocked. `tsconfig.build.json` keeps `*.spec.ts` out of the compiled `dist/`.
+
 ## AI generation (optional)
 
 Bulk logbook fill-up and chapter drafting call the Anthropic Messages API through `src/ai/llm.service.ts`. Configure these in `.env`:
@@ -46,6 +57,16 @@ Bulk logbook fill-up and chapter drafting call the Anthropic Messages API throug
 - `AI_DEV_UNLOCK=true` — dev-only: treats every pass and the free trial as unlocked so paid paths can be tested without a payment flow. Never enable in production.
 
 The free trial (`AI_TRIAL_DAYS = 7` in `logbook.service.ts`) drafts the first week of logbook entries; the rest unlock with a successful `IT_SIWES_PASS` purchase. Chapter 1 drafts free; Chapters 2–5 unlock with a `PROJECT_PASS` purchase.
+
+## Password reset email (optional)
+
+The "Forgot password?" flow (`POST /auth/forgot-password`, `POST /auth/reset-password`) emails a one-hour, single-use reset link. Only the SHA-256 digest of the token is stored, so a database leak can't hand out working links. Configure in `.env`:
+
+- `RESEND_API_KEY` — enables real delivery via Resend's HTTP API. Without it the reset link is written to the **backend console** instead, so the flow still works locally.
+- `MAIL_FROM` — the verified sender (Resend's default only delivers to your own address in test mode).
+- `PASSWORD_RESET_DEV_MODE=true` — dev-only: when no mail provider is configured, also returns the link in the API response so the UI shows a clickable "Open your reset link". Never enable in production.
+
+`forgot-password` always returns the same message whether or not the account exists, so it can't be used to discover registered emails. The `npm run reset:password` CLI still exists as an offline fallback.
 
 ## Payments (optional)
 
@@ -63,6 +84,8 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 |---|---|
 | `POST /auth/signup` | Create an account — `{ fullName, email, password }` |
 | `POST /auth/login` | Returns a JWT — `{ email, password }` |
+| `POST /auth/forgot-password` | Email a reset link — `{ email }`. Same response whether or not the account exists |
+| `POST /auth/reset-password` | Set a new password from a reset token — `{ token, password }` |
 | `GET /users/me` | Current user's profile + placement + projects (needs `Authorization: Bearer <token>`) |
 | `PATCH /users/me` | Update fullName/school/department/moduleChoice |
 | `POST /it-placement` | Set up (or edit) the IT placement — generates the full holiday-aware attendance calendar in one call |
