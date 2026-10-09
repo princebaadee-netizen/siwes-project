@@ -23,6 +23,10 @@ Backend unit tests (Jest + ts-jest; no database or network needed):
 npm run test:api        # runs `npm test` in backend/
 ```
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push/PR: the **backend** job typechecks via `nest build`, runs the Jest suite, and builds; the **frontend** job runs `tsc --noEmit` and `next build`. It needs no database or secrets (the tests are fully mocked). It only kicks in once the repo is pushed to GitHub.
+
 ## What's built
 
 - **Auth** — sign up, sign in, a **forgot-password** flow (`/forgot-password` → `/reset-password`) that emails a one-hour, single-use reset link, and **email verification** on signup (`/verify-email?token=...`, with a resend banner on the dashboard until confirmed). With no mail provider configured these links are written to the backend console, so both flows are testable locally.
