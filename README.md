@@ -29,6 +29,28 @@ npm run test:web   # frontend only — Vitest (lib/sync.ts, lib/api.ts helpers)
 
 `.github/workflows/ci.yml` runs on every push/PR: the **backend** job typechecks via `nest build`, runs the Jest suite, and builds; the **frontend** job runs `tsc --noEmit`, the Vitest suite, and `next build`. It needs no database or secrets (the tests are fully mocked). It only kicks in once the repo is pushed to GitHub.
 
+## Deploying
+
+Two pieces: the NestJS API and the Next.js frontend. Deploy the API first — you need its URL for the frontend.
+
+### Backend (Render / Railway / Fly.io — any Node host)
+
+- **Build**: `npm ci && npx prisma generate && npm run build`
+- **Start**: `npm run start:prod` (runs `node dist/main.js`)
+- **Release/once**: `npx prisma migrate deploy` to apply migrations (including `add_email_verification`)
+- **Env**: `DATABASE_URL`, `JWT_SECRET` (long random), `FRONTEND_URL` (the deployed frontend URL — it's baked into reset and verification links), and `PORT` if the host needs one. Optional: `ANTHROPIC_API_KEY`/`AI_MODEL`, `PAYSTACK_SECRET_KEY`, `RESEND_API_KEY`/`MAIL_FROM`
+- Keep `AI_DEV_UNLOCK`, `PAYSTACK_DEV_MODE` and `PASSWORD_RESET_DEV_MODE` **off** in production
+
+### Frontend (Vercel — or any Node host)
+
+- Set `API_PROXY_TARGET` to the deployed API URL (e.g. `https://your-api.onrender.com`). It's read when the Next server starts; on Vercel set it as a project env var and redeploy. Locally leave it unset and the proxy uses `backend/.env`'s `PORT`
+- Build/start: `npm run build` / `npm run start`
+
+### Wiring the external callbacks
+
+- Paystack webhook URL: `https://your-api.example.com/payments/webhook`
+- The API's `FRONTEND_URL` must equal the deployed frontend so reset/verify links point to the right place
+
 ## What's built
 
 - **Auth** — sign up, sign in, a **forgot-password** flow (`/forgot-password` → `/reset-password`) that emails a one-hour, single-use reset link, and **email verification** on signup (`/verify-email?token=...`, with a resend banner on the dashboard until confirmed). With no mail provider configured these links are written to the backend console, so both flows are testable locally.

@@ -25,10 +25,22 @@ const nextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: `http://localhost:${backendPort()}/:path*`,
+        destination: `${apiTarget()}/:path*`,
       },
     ];
   },
 };
+
+/**
+ * Where /api/* is proxied. Locally that's the backend on its own PORT; in a
+ * hosted setup set API_PROXY_TARGET (e.g. https://your-api.onrender.com) so the
+ * frontend reaches the deployed API. Read when the server starts, so this can
+ * be a non-public env var (no NEXT_PUBLIC_ prefix).
+ */
+function apiTarget() {
+  const configured = process.env.API_PROXY_TARGET?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  return `http://localhost:${backendPort()}`;
+}
 
 module.exports = nextConfig;
