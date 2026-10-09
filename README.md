@@ -17,15 +17,17 @@ Then open http://localhost:3000 — it'll route you into onboarding automaticall
 
 ## Tests
 
-Backend unit tests (Jest + ts-jest; no database or network needed):
+No database or network needed — every suite mocks its dependencies.
 
 ```bash
-npm run test:api        # runs `npm test` in backend/
+npm test           # backend (Jest) + frontend (Vitest)
+npm run test:api   # backend only — Jest + ts-jest
+npm run test:web   # frontend only — Vitest (lib/sync.ts, lib/api.ts helpers)
 ```
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push/PR: the **backend** job typechecks via `nest build`, runs the Jest suite, and builds; the **frontend** job runs `tsc --noEmit` and `next build`. It needs no database or secrets (the tests are fully mocked). It only kicks in once the repo is pushed to GitHub.
+`.github/workflows/ci.yml` runs on every push/PR: the **backend** job typechecks via `nest build`, runs the Jest suite, and builds; the **frontend** job runs `tsc --noEmit`, the Vitest suite, and `next build`. It needs no database or secrets (the tests are fully mocked). It only kicks in once the repo is pushed to GitHub.
 
 ## What's built
 
