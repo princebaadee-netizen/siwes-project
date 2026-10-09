@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
@@ -8,14 +8,15 @@ const sha256 = (value: string) => createHash('sha256').update(value).digest('hex
 
 describe('AuthService password reset', () => {
   let prisma: any;
-  let mail: { sendPasswordReset: jest.Mock };
+  let mail: { sendPasswordReset: jest.Mock; sendVerificationEmail: jest.Mock };
+  let jwt: any;
   let service: AuthService;
   const savedDev = process.env.PASSWORD_RESET_DEV_MODE;
   const savedFront = process.env.FRONTEND_URL;
 
   beforeEach(() => {
     prisma = {
-      user: { findUnique: jest.fn(), update: jest.fn() },
+      user: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
       passwordResetToken: {
         create: jest.fn(),
         deleteMany: jest.fn(),
@@ -24,8 +25,9 @@ describe('AuthService password reset', () => {
       },
       $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
-    mail = { sendPasswordReset: jest.fn() };
-    service = new AuthService(prisma, { sign: jest.fn() } as any, mail as unknown as MailService);
+    mail = { sendPasswordReset: jest.fn(), sendVerificationEmail: jest.fn() };
+    jwt = { sign: jest.fn().mockReturnValue('signed.jwt.token'), verify: jest.fn() };
+    service = new AuthService(prisma, jwt as any, mail as unknown as MailService);
     delete process.env.PASSWORD_RESET_DEV_MODE;
     delete process.env.FRONTEND_URL;
   });
@@ -155,6 +157,63 @@ describe('AuthService password reset', () => {
       expect(tokenUpdate.where).toEqual({ id: 't1' });
       expect(tokenUpdate.data.usedAt).toBeInstanceOf(Date);
       expect(res).toEqual({ ok: true });
+    });
+  });
+
+  describe('verifyEmail', () => {
+    it('rejects a token that fails verification', async () => {
+      jwt.verify.mockImplementation(() => {
+        throw new Error('bad signature');
+      });
+      await expect(service.verifyEmail('garbage')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a valid JWT that is not a verification token', async () => {
+      jwt.verify.mockReturnValue({ sub: 'u1', purpose: 'something-else' });
+      await expect(service.verifyEmail('token')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('marks the account verified for a good token', async () => {
+      jwt.verify.mockReturnValue({ sub: 'u1', purpose: 'verify-email' });
+      prisma.user.updateMany.mockResolvedValue({ count: 1 });
+
+      const res = await service.verifyEmail('token');
+
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { emailVerified: true },
+      });
+      expect(res).toEqual({ ok: true });
+    });
+  });
+
+  describe('resendVerification', () => {
+    it('throws when the user no longer exists', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      await expect(service.resendVerification('u1')).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('does nothing when the account is already verified', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', emailVerified: true });
+
+      const res = await service.resendVerification('u1');
+
+      expect(mail.sendVerificationEmail).not.toHaveBeenCalled();
+      expect(res).toEqual({ ok: true, emailVerified: true });
+    });
+
+    it('emails a fresh verification link when still unverified', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', emailVerified: false });
+
+      await service.resendVerification('u1');
+
+      expect(jwt.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 'u1', email: 'a@b.com', purpose: 'verify-email' }),
+        expect.objectContaining({ expiresIn: '24h' }),
+      );
+      const [to, url] = mail.sendVerificationEmail.mock.calls[0];
+      expect(to).toBe('a@b.com');
+      expect(url.startsWith('http://localhost:3000/verify-email?token=')).toBe(true);
     });
   });
 });

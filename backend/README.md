@@ -72,6 +72,10 @@ The "Forgot password?" flow (`POST /auth/forgot-password`, `POST /auth/reset-pas
 
 `forgot-password` always returns the same message whether or not the account exists, so it can't be used to discover registered emails. The `npm run reset:password` CLI still exists as an offline fallback.
 
+## Email verification
+
+Signing up sends a confirmation email (`/verify-email?token=...`); the link is a signed JWT with a `purpose: 'verify-email'` claim and a 24-hour expiry, so no extra table is needed — verification just flips `User.emailVerified`. The dashboard shows a resend banner until the address is confirmed. Like the reset flow, when no mail provider is configured the link is written to the backend console, and verification never blocks access (it's a nudge, not a gate). This adds one column (`emailVerified`); apply it with `npm run prisma:migrate` (migration `add_email_verification`).
+
 ## Payments (optional)
 
 Pass purchases go through Paystack. Configure in `.env`:
@@ -90,6 +94,8 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 | `POST /auth/login` | Returns a JWT — `{ email, password }` |
 | `POST /auth/forgot-password` | Email a reset link — `{ email }`. Same response whether or not the account exists |
 | `POST /auth/reset-password` | Set a new password from a reset token — `{ token, password }` |
+| `POST /auth/verify-email` | Confirm an email address from the link token — `{ token }` |
+| `POST /auth/resend-verification` | Re-send the verification link (auth required) |
 | `GET /users/me` | Current user's profile + placement + projects (needs `Authorization: Bearer <token>`) |
 | `PATCH /users/me` | Update fullName/school/department/moduleChoice |
 | `POST /it-placement` | Set up (or edit) the IT placement — generates the full holiday-aware attendance calendar in one call |

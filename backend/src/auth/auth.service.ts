@@ -50,7 +50,10 @@ export class AuthService {
       throw err;
     }
 
-    return this.buildAuthResponse(user.id, user.email, user.fullName);
+    // Fire the verification email, but never let a mail hiccup block signup.
+    await this.sendVerification(user.id, user.email);
+
+    return this.buildAuthResponse(user);
   }
 
   async login(dto: LoginDto) {
@@ -66,7 +69,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    return this.buildAuthResponse(user.id, user.email, user.fullName);
+    return this.buildAuthResponse(user);
   }
 
   async requestPasswordReset(emailRaw: string) {
@@ -124,15 +127,66 @@ export class AuthService {
     return { ok: true };
   }
 
+  async verifyEmail(token: string) {
+    let payload: { sub?: string; purpose?: string };
+    try {
+      payload = this.jwtService.verify(token);
+    } catch {
+      throw new BadRequestException('This verification link is invalid or has expired.');
+    }
+
+    if (payload?.purpose !== 'verify-email' || !payload.sub) {
+      throw new BadRequestException('This verification link is invalid or has expired.');
+    }
+
+    // updateMany so a link for a since-deleted account is a no-op, not a 500.
+    await this.prisma.user.updateMany({
+      where: { id: payload.sub },
+      data: { emailVerified: true },
+    });
+    return { ok: true };
+  }
+
+  async resendVerification(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+    if (!user.emailVerified) {
+      await this.sendVerification(user.id, user.email);
+    }
+    return { ok: true, emailVerified: user.emailVerified };
+  }
+
+  private async sendVerification(userId: string, email: string): Promise<void> {
+    const token = this.jwtService.sign(
+      { sub: userId, email, purpose: 'verify-email' },
+      { expiresIn: '24h' },
+    );
+    const base = (process.env.FRONTEND_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+    const verifyUrl = `${base}/verify-email?token=${token}`;
+    await this.mail.sendVerificationEmail(email, verifyUrl);
+  }
+
   private hashToken(raw: string): string {
     return createHash('sha256').update(raw).digest('hex');
   }
 
-  private buildAuthResponse(userId: string, email: string, fullName: string) {
-    const token = this.jwtService.sign({ sub: userId, email });
+  private buildAuthResponse(user: {
+    id: string;
+    email: string;
+    fullName: string;
+    emailVerified: boolean;
+  }) {
+    const token = this.jwtService.sign({ sub: user.id, email: user.email });
     return {
       accessToken: token,
-      user: { id: userId, email, fullName },
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        emailVerified: user.emailVerified,
+      },
     };
   }
 }

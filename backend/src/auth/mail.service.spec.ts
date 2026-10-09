@@ -76,4 +76,16 @@ describe('MailService', () => {
 
     await expect(service.sendPasswordReset('a@b.com', 'http://x/y')).resolves.toBe(false);
   });
+
+  it('sends a verification email containing the link', async () => {
+    process.env.RESEND_API_KEY = 'test_key';
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    global.fetch = fetchMock as any;
+
+    await expect(service.sendVerificationEmail('a@b.com', 'http://x/verify')).resolves.toBe(true);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.subject).toContain('Verify');
+    expect(body.html).toContain('http://x/verify');
+  });
 });

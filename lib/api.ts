@@ -61,7 +61,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export interface AuthResponse {
   accessToken: string;
-  user: { id: string; email: string; fullName: string };
+  user: { id: string; email: string; fullName: string; emailVerified: boolean };
 }
 
 export const api = {
@@ -87,6 +87,17 @@ export const api = {
     request<{ ok: boolean }>("/auth/reset-password", {
       method: "POST",
       body: JSON.stringify({ token, password }),
+    }),
+
+  verifyEmail: (token: string) =>
+    request<{ ok: boolean }>("/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
+  resendVerification: () =>
+    request<{ ok: boolean; emailVerified: boolean }>("/auth/resend-verification", {
+      method: "POST",
     }),
 
   getMe: () => request<any>("/users/me"),

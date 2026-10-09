@@ -25,7 +25,7 @@ npm run test:api        # runs `npm test` in backend/
 
 ## What's built
 
-- **Auth** — sign up, sign in, and a **forgot-password** flow (`/forgot-password` → `/reset-password`) that emails a one-hour, single-use reset link. With no mail provider configured the link is written to the backend console, so the flow is testable locally.
+- **Auth** — sign up, sign in, a **forgot-password** flow (`/forgot-password` → `/reset-password`) that emails a one-hour, single-use reset link, and **email verification** on signup (`/verify-email?token=...`, with a resend banner on the dashboard until confirmed). With no mail provider configured these links are written to the backend console, so both flows are testable locally.
 - **`/onboarding`** — module choice → profile → **account (email/password — creates a real account)** → IT placement details → attendance pattern (day-count + constrained day-picker) → project topic (if chosen) → review. Clicking "Go to dashboard" now actually calls the backend: signup → save profile → create IT placement (which generates the holiday-aware calendar server-side) → create project (which auto-generates the 5 chapters). Local `localStorage` state is still kept as a working cache/draft while filling the form, matching the plan's "offline continuity" design.
 - **`/dashboard`** — tabbed side navigation shell.
   - **Overview**: fetches real chapter-completion and logbook progress from the backend.
@@ -48,6 +48,7 @@ app/
   login/page.tsx          — real login screen (email/password → JWT)
   forgot-password/page.tsx — request a reset link by email
   reset-password/page.tsx  — set a new password from the emailed token
+  verify-email/page.tsx    — confirm an email address from the signup link
   onboarding/page.tsx      — the wizard, now calling the real backend on finish
   dashboard/
     layout.tsx             — tabbed side nav shell
