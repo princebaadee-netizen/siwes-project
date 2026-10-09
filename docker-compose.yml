@@ -1,0 +1,42 @@
+# One-command backend for local dev or a quick self-host:
+#   docker compose up --build
+# Gives you the API on http://localhost:4001 backed by Postgres on 5432.
+# The API container runs `prisma migrate deploy` on boot, so the schema (and the
+# email-verification migration) is applied automatically. Run the frontend
+# separately with `npm run dev` — it proxies /api to localhost:4001 by default.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: siwes_app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/siwes_app?schema=public
+      JWT_SECRET: change-me-in-production
+      FRONTEND_URL: http://localhost:3000
+      PORT: 4001
+      # Dev-only convenience. Remove in production.
+      AI_DEV_UNLOCK: "true"
+      PAYSTACK_DEV_MODE: "true"
+    ports:
+      - "4001:4001"
+
+volumes:
+  pgdata:

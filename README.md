@@ -46,6 +46,16 @@ Two pieces: the NestJS API and the Next.js frontend. Deploy the API first — yo
 - Set `API_PROXY_TARGET` to the deployed API URL (e.g. `https://your-api.onrender.com`). It's read when the Next server starts; on Vercel set it as a project env var and redeploy. Locally leave it unset and the proxy uses `backend/.env`'s `PORT`
 - Build/start: `npm run build` / `npm run start`
 
+### Docker (optional, one command)
+
+For a self-contained API + database without installing Postgres:
+
+```bash
+docker compose up --build
+```
+
+This builds the API from `backend/Dockerfile`, starts Postgres, and runs `prisma migrate deploy` on boot — so the schema and the email-verification migration apply automatically. The API listens on http://localhost:4001; run the frontend with `npm run dev` (it proxies there by default). Replace the placeholder `JWT_SECRET` and drop the dev-only flags in `docker-compose.yml` before exposing it anywhere.
+
 ### Wiring the external callbacks
 
 - Paystack webhook URL: `https://your-api.example.com/payments/webhook`

@@ -37,6 +37,8 @@ npm run start:dev
 
 Server runs on **http://localhost:4001** (set by `PORT` in `.env`, which the frontend's `/api` proxy reads). Health check: `GET /health`.
 
+Prefer not to install Postgres? `docker compose up --build` from the repo root starts this API plus a Postgres database and applies migrations automatically (see the root README's Deploying section).
+
 ## Tests
 
 Unit tests run with Jest + ts-jest:
