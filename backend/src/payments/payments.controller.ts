@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
+import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUserId } from '../auth/current-user.decorator';
 import { PaymentsService } from './payments.service';
@@ -54,6 +55,7 @@ export class PaymentsController {
    * Paystack server-to-server callback. This route is public by design: it is
    * authenticated by the HMAC signature over the raw body, not a JWT.
    */
+  @SkipThrottle()
   @Post('webhook')
   webhook(
     @Req() req: RawBodyRequest<Request>,

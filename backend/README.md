@@ -48,6 +48,10 @@ npm run test:watch
 
 They target the places where a regression would be costly or silent — price resolution and the naira→kobo conversion (`pricing.spec.ts`), the password-reset flow including token expiry, single-use and email-enumeration safety (`auth.service.spec.ts`), and the mail sender's provider/no-provider paths (`mail.service.spec.ts`). No database or network is needed: Prisma, the mail provider and the token store are mocked. `tsconfig.build.json` keeps `*.spec.ts` out of the compiled `dist/`.
 
+## Rate limiting
+
+A global `ThrottlerGuard` (100 requests / minute / IP) covers every route. Auth tightens it further via `@Throttle` on `auth.controller.ts`: signup and login 5/min, `reset-password` 5/min, and `forgot-password` 3/min (it sends email). The Paystack `/payments/webhook` opts out with `@SkipThrottle()` so provider callbacks are never dropped.
+
 ## AI generation (optional)
 
 Bulk logbook fill-up and chapter drafting call the Anthropic Messages API through `src/ai/llm.service.ts`. Configure these in `.env`:
