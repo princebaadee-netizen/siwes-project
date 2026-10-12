@@ -48,21 +48,27 @@ npm test            # or: npm run test:api   (from the repo root)
 npm run test:watch
 ```
 
-They target the places where a regression would be costly or silent — price resolution and the naira→kobo conversion (`pricing.spec.ts`), the password-reset flow including token expiry, single-use and email-enumeration safety (`auth.service.spec.ts`), and the mail sender's provider/no-provider paths (`mail.service.spec.ts`). No database or network is needed: Prisma, the mail provider and the token store are mocked. `tsconfig.build.json` keeps `*.spec.ts` out of the compiled `dist/`.
+They target the places where a regression would be costly or silent — price resolution and the naira→kobo conversion (`pricing.spec.ts`), the password-reset flow including token expiry, single-use and email-enumeration safety (`auth.service.spec.ts`), the mail sender's provider/no-provider paths (`mail.service.spec.ts`), the AI token→cost model (`token-cost.spec.ts`), and the usage summary's aggregation and limit clamping (`usage.service.spec.ts`). No database or network is needed: Prisma, the mail provider and the token store are mocked. `tsconfig.build.json` keeps `*.spec.ts` out of the compiled `dist/`.
 
 ## Rate limiting
 
-A global `ThrottlerGuard` (100 requests / minute / IP) covers every route. Auth tightens it further via `@Throttle` on `auth.controller.ts`: signup and login 5/min, `reset-password` 5/min, and `forgot-password` 3/min (it sends email). The Paystack `/payments/webhook` opts out with `@SkipThrottle()` so provider callbacks are never dropped.
+A global `ThrottlerGuard` (100 requests / minute / IP) covers every route. Auth tightens it further via `@Throttle` on `auth.controller.ts`: signup and login 5/min, `reset-password` 5/min, and `forgot-password` 3/min (it sends email). The AI-backed routes carry their own tighter caps because each call costs money — `POST /logbook/bulk` and both chapter draft/regenerate routes are 10/min, `POST /logbook/polish` is 20/min. The Paystack `/payments/webhook` opts out with `@SkipThrottle()` so provider callbacks are never dropped.
+
+The global guard keys on IP, which is unfair on a shared campus/office NAT. So the AI routes add a second, route-level `AiThrottlerGuard` (`src/common/ai-throttler.guard.ts`) that tracks by `request.userId`. It is applied with `@UseGuards(AiThrottlerGuard)` on the methods — route guards run after the controller-level `JwtAuthGuard`, so the user id is set — and the two compose: a request must pass both the per-IP and per-account limit.
+
+By default the counters live in the process's memory, which is fine for a single instance. Set `REDIS_URL` to store them in Redis instead so the limits hold across every API instance behind a load balancer (`src/common/redis-throttler.module.ts`; falls back to in-memory when unset).
 
 ## AI generation (optional)
 
-Bulk logbook fill-up and chapter drafting call the Anthropic Messages API through `src/ai/llm.service.ts`. Configure these in `.env`:
+Bulk logbook fill-up, single-day polish and chapter drafting call the Anthropic Messages API through `src/ai/llm.service.ts`. Configure these in `.env`:
 
 - `ANTHROPIC_API_KEY` — enables the AI endpoints. Without it they return **503** and the UI buttons stay disabled.
 - `AI_MODEL` — the Claude model id (default `claude-sonnet-4-5`). Change it if your account uses a different model; Anthropic returns a 400 for an unknown model.
+- `AI_MAX_REGENERATIONS` — how many times a chapter may be regenerated (each pass is a fresh AI call). Defaults to 3.
+- `AI_INPUT_PRICE_KOBO_PER_MTOK` / `AI_OUTPUT_PRICE_KOBO_PER_MTOK` — kobo per million input/output tokens, used to estimate the cost recorded on each `GenerationLog` (see `src/ai/token-cost.ts`). Defaults approximate Claude Sonnet pricing; set them to match your model and naira rate.
 - `AI_DEV_UNLOCK=true` — dev-only: treats every pass and the free trial as unlocked so paid paths can be tested without a payment flow. Never enable in production.
 
-The free trial (`AI_TRIAL_DAYS = 7` in `logbook.service.ts`) drafts the first week of logbook entries; the rest unlock with a successful `IT_SIWES_PASS` purchase. Chapter 1 drafts free; Chapters 2–5 unlock with a `PROJECT_PASS` purchase.
+The free trial (`AI_TRIAL_DAYS = 7` in `logbook.service.ts`) covers the first week of logbook entries — the first 7 confirmed attendance days — shared by bulk fill-up and single-day polish, and it is spent only once (`ITPlacement.trialWeekUsed`) so deleting entries can't re-farm it; the rest unlock with a successful `IT_SIWES_PASS` purchase. Chapter 1 drafts free; Chapters 2–5 unlock with a `PROJECT_PASS` purchase. `POST /logbook/polish` only returns the polished text — the student saves it, and that save records the entry's `source` (`AI_SINGLE_DAY`).
 
 ## Password reset email (optional)
 
@@ -101,22 +107,32 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 | `GET /users/me` | Current user's profile + placement + projects (needs `Authorization: Bearer <token>`) |
 | `PATCH /users/me` | Update fullName/school/department/moduleChoice |
 | `POST /it-placement` | Set up (or edit) the IT placement — generates the full holiday-aware attendance calendar in one call |
-| `GET /it-placement/me` | Fetch placement + generated calendar |
+| `GET /it-placement/me` | Fetch placement + generated calendar, plus a `trial` summary (`total`/`used`/`remaining`/`spent`) for the free AI week |
 | `POST /it-placement/confirm-holidays` | The one gating question from the plan — pass the list of holiday dates the student actually worked; everything else gets marked not-attended |
 | `GET /logbook` | List the logbook entries for the placement |
 | `POST /logbook` | Create one entry — `{ date, activity, evidenceUrl? }` |
 | `PATCH /logbook/:id` | Edit an entry — `{ activity?, evidenceUrl?, status? }` |
 | `DELETE /logbook/:id` | Delete an entry (reopens that day) |
 | `POST /logbook/bulk` | AI bulk fill-up from a free-text description — `{ description }` (first 7 days free) |
-| `POST /projects` | Create a project — auto-creates all 5 chapters, Chapter 1 pre-marked free |
+| `POST /logbook/polish` | AI single-day polish — `{ date, notes }` → `{ activity }` (preview only; the client saves it). First 7 attendance days free |
+| `GET /topics` | The topic bank — public catalogue, filter by `?field=` and search with `?q=` |
+| `GET /topics/fields` | The distinct fields in the topic bank (public) |
+| `GET /admin/topics` | Admin-only: list the topic bank (same field/search filters) |
+| `POST /admin/topics` | Admin-only: add a topic — `{ title, field, description? }` |
+| `PATCH /admin/topics/:id` | Admin-only: edit a topic (only provided fields change) |
+| `DELETE /admin/topics/:id` | Admin-only: remove a topic (projects keep their own copy of the title) |
+| `POST /projects` | Create a project — auto-creates all 5 chapters, Chapter 1 pre-marked free. Accepts `topicSource` (`MANUAL`/`BANK`/`AI_SUGGESTED`) |
+| `POST /projects/suggest-topics` | AI-suggest up to 5 project topics from `{ field?, interests? }` → `{ field, topics }` (falls back to the student's department; per-account rate-limited) |
 | `GET /projects` | List the student's projects |
 | `GET /projects/:id` | One project + its chapters |
 | `POST /projects/:id/chapters/:chapterNumber/draft` | AI-draft one chapter from `{ rawInputText }` (Chapter 1 free, the rest need the Project Pass) |
+| `POST /projects/:id/chapters/:chapterNumber/regenerate` | Re-draft a chapter — `{ rawInputText? }` (falls back to the stored notes). Bounded by `AI_MAX_REGENERATIONS` |
 | `GET /projects/:id/references` | List the project's references |
 | `POST /projects/:id/references` | Add a reference — `{ citationText, sourceType, doiOrIsbnOrLink? }` |
 | `POST /projects/:id/references/:referenceId/verify` | Verify one reference (Crossref → DataCite → Open Library, else link-check) |
 | `DELETE /projects/:id/references/:referenceId` | Remove a reference |
 | `POST /projects/:id/mark-complete` | Student explicitly marks the project done (read-only from here) |
+| `GET /usage` | The caller's own AI usage — totals, a per-`GenerationType` breakdown and recent generations, all with estimated token counts and cost in kobo. `?limit=` caps the recent list (default 20, max 100) |
 | `POST /projects/:id/reopen` | Free reopen for revisions, per the plan |
 | `GET /payments/prices` | Current pass prices in naira (public) |
 | `POST /payments/initialize` | Start a pass purchase — `{ productType }` → Paystack checkout URL (or an instant dev-mode grant) |
@@ -131,6 +147,8 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 - **Project completion/reopen**: matches the "read-only after complete, free reopen for revisions" design exactly.
 - **Citation verification** (`reference-verifier.ts`): a DOI is looked up in Crossref, then DataCite; an ISBN in Open Library; a bare URL is only reachability-checked. Results are stored with a tier — `API_VERIFIED`, `LINK_CHECKED`, or `STUDENT_CONFIRMED` — so a citation is never silently marked verified.
 - **Money stored in kobo** (`amountKobo` on `Purchase`) to avoid floating-point currency bugs.
+- **Topic bank** (`topics.service.ts`): a seeded, admin-maintained catalogue of project topics (`ProjectTopic`) that students can browse by field and pick from instead of inventing one. `create-project` records the `topicSource` so a topic's origin is never ambiguous. A student can also ask the AI for tailored suggestions (`projects.service.ts#suggestTopics`), recorded under the `TOPIC_SUGGESTION` generation type.
+- **Admin topic management** (`topics-admin.controller.ts`): the CRUD routes above sit behind `JwtAuthGuard` + `AdminGuard` (`src/auth/admin.guard.ts`). Admins are chosen by the comma-separated `ADMIN_EMAILS` env allowlist rather than a role column — an admin signs in like anyone else, and the client learns they're an admin from `isAdmin` on `GET /users/me` (purely showing the UI; the guard is the real enforcement). An unset allowlist switches the admin API off entirely.
 
 ## Report & PDF export
 

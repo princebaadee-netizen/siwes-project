@@ -27,9 +27,10 @@ enum EntryStatus {
   FINALIZED
 }
 
-enum ChapterMode {
+enum TopicSource {
   MANUAL
-  AI_BULK
+  BANK
+  AI_SUGGESTED
 }
 
 enum ProjectStatus {
@@ -71,6 +72,7 @@ enum GenerationType {
   BULK_LOGBOOK
   CHAPTER_DRAFT
   SINGLE_DAY_POLISH
+  TOPIC_SUGGESTION
 }
 
 // ---------- Core ----------
@@ -184,7 +186,6 @@ model BulkFillupRequest {
   extractedStartDate   DateTime?
   extractedEndDate     DateTime?
   extractedSkills      String[]
-  regenerationsUsed    Int         @default(0)
   createdAt            DateTime    @default(now())
 
   @@map("bulk_fillup_requests")
@@ -193,7 +194,7 @@ model BulkFillupRequest {
 model LogbookEntry {
   id               String                 @id @default(uuid())
   calendarDayId    String                 @unique
-  calendarDay      AttendanceCalendarDay  @relation(fields: [calendarDayId], references: [id])
+  calendarDay      AttendanceCalendarDay  @relation(fields: [calendarDayId], references: [id], onDelete: Cascade)
   activity         String
   evidenceUrl      String?
   source           LogbookEntrySource     @default(MANUAL)
@@ -206,13 +207,26 @@ model LogbookEntry {
 
 // ---------- Final Year Project ----------
 
+// A curated, admin-maintained catalogue of project topics students can pick
+// from instead of inventing one. Seeded like the public-holiday list.
+model ProjectTopic {
+  id          String   @id @default(uuid())
+  title       String   @unique
+  field       String
+  description String?
+  createdAt   DateTime @default(now())
+
+  @@index([field])
+  @@map("project_topics")
+}
+
 model Project {
   id           String        @id @default(uuid())
   userId       String
   user         User          @relation(fields: [userId], references: [id])
   title        String
   supervisorName String?
-  topicSource  String?       // manual | bank | ai_suggested
+  topicSource  TopicSource?
   status       ProjectStatus @default(IN_PROGRESS)
   completedAt  DateTime?
   createdAt    DateTime      @default(now())
@@ -229,7 +243,6 @@ model ProjectChapter {
   project         Project     @relation(fields: [projectId], references: [id])
   chapterNumber   Int
   title           String
-  mode            ChapterMode @default(MANUAL)
   rawInputText    String?
   content         String?
   status          EntryStatus @default(DRAFT)

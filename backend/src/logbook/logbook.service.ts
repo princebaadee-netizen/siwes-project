@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -8,22 +9,21 @@ import {
 import { PurchaseProductType } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { LlmService } from '../ai/llm.service';
+import { estimateCostKobo } from '../ai/token-cost';
+import { AI_TRIAL_DAYS } from '../ai/trial';
 import { CreateLogbookEntryDto } from './dto/create-logbook-entry.dto';
 import { UpdateLogbookEntryDto } from './dto/update-logbook-entry.dto';
 import { BulkFillupDto } from './dto/bulk-fillup.dto';
+import { PolishLogbookDto } from './dto/polish-logbook.dto';
 import {
   EXTRACTION_SYSTEM,
   GENERATION_SYSTEM,
   extractionPrompt,
   generationPrompt,
 } from './bulk-fillup.prompt';
+import { POLISH_SYSTEM, polishPrompt } from './logbook.prompt';
 
 const withDay = { calendarDay: { include: { placement: true } } } as const;
-
-// The plan's free trial: the first week of an AI-written logbook is free, the
-// rest needs an IT/SIWES Pass. Until payments exist nobody has a pass, so in
-// practice everyone gets the trial (or everything, with AI_DEV_UNLOCK).
-const AI_TRIAL_DAYS = 7;
 
 @Injectable()
 export class LogbookService {
@@ -57,6 +57,59 @@ export class LogbookService {
       throw new NotFoundException('No IT placement set up yet. Complete onboarding first.');
     }
     return placement;
+  }
+
+  /** The ids of the free-trial days: the first AI_TRIAL_DAYS confirmed days. */
+  private async trialDayIds(placementId: string): Promise<string[]> {
+    const days = await this.prisma.attendanceCalendarDay.findMany({
+      where: { placementId, confirmedAttended: true },
+      orderBy: { date: 'asc' },
+      take: AI_TRIAL_DAYS,
+      select: { id: true },
+    });
+    return days.map((d) => d.id);
+  }
+
+  /**
+   * AI writes are free for the first week of the placement and behind the
+   * IT/SIWES Pass after that. Keying the trial to the day's position among the
+   * confirmed attendance days (rather than "the next N open days") means
+   * writing one day at a time can't be used to get the whole logbook free, and
+   * the trialWeekUsed flag stops the free week being re-farmed after deletion.
+   */
+  private async canAiWriteDay(
+    userId: string,
+    placement: { id: string; trialWeekUsed: boolean },
+    dayId: string,
+  ): Promise<boolean> {
+    if (process.env.AI_DEV_UNLOCK === 'true') return true;
+    if (await this.hasPass(userId, PurchaseProductType.IT_SIWES_PASS)) return true;
+    if (placement.trialWeekUsed) return false;
+
+    const trialDays = await this.trialDayIds(placement.id);
+    return trialDays.includes(dayId);
+  }
+
+  /**
+   * Once every free-trial day has an entry the trial is spent, so flag the
+   * placement. This is what makes the free week once-only: without it a student
+   * could delete the generated entries and get another free week.
+   */
+  private async consumeTrialIfDone(placement: { id: string; trialWeekUsed: boolean }) {
+    if (placement.trialWeekUsed) return;
+
+    const trialDays = await this.trialDayIds(placement.id);
+    if (trialDays.length === 0) return;
+
+    const remaining = await this.prisma.attendanceCalendarDay.count({
+      where: { id: { in: trialDays }, hasLogbookEntry: false },
+    });
+    if (remaining === 0) {
+      await this.prisma.iTPlacement.update({
+        where: { id: placement.id },
+        data: { trialWeekUsed: true },
+      });
+    }
   }
 
   /**
@@ -119,12 +172,13 @@ export class LogbookService {
       throw new ConflictException('A logbook entry already exists for this date.');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const entry = await tx.logbookEntry.create({
+    const entry = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.logbookEntry.create({
         data: {
           calendarDayId: day.id,
           activity: dto.activity.trim(),
           evidenceUrl: dto.evidenceUrl ?? null,
+          source: dto.source ?? 'MANUAL',
         },
         include: { calendarDay: true },
       });
@@ -132,14 +186,80 @@ export class LogbookService {
         where: { id: day.id },
         data: { hasLogbookEntry: true },
       });
-      return entry;
+      return created;
     });
+
+    // A saved AI-only entry can be the one that fills the last free-trial day.
+    if (dto.source === 'AI_SINGLE_DAY') {
+      await this.consumeTrialIfDone(placement);
+    }
+
+    return entry;
+  }
+
+  /**
+   * The "polish my note" flow: turn a rough sentence for one day into a proper
+   * logbook entry. This only previews the text — the student reviews it and
+   * saves it through `create`, which is where the entry's `source` is recorded,
+   * so an AI-written entry is never saved without the student seeing it first.
+   */
+  async polish(userId: string, dto: PolishLogbookDto) {
+    if (!this.llm.configured) {
+      throw new ServiceUnavailableException(
+        'AI logbook generation is not configured. Set ANTHROPIC_API_KEY on the backend.',
+      );
+    }
+
+    const placement = await this.placementFor(userId);
+    const day = await this.calendarDayFor(placement.id, dto.date);
+
+    if (day.confirmedAttended === null) {
+      throw new BadRequestException('Confirm whether you worked this date before polishing it.');
+    }
+    if (!day.confirmedAttended) {
+      throw new BadRequestException(
+        'You marked this date as not attended, so it cannot have a logbook entry.',
+      );
+    }
+    if (day.hasLogbookEntry) {
+      throw new ConflictException('A logbook entry already exists for this date.');
+    }
+
+    if (!(await this.canAiWriteDay(userId, placement, day.id))) {
+      throw new ForbiddenException(
+        `AI drafting is free for your first ${AI_TRIAL_DAYS} attendance days. ` +
+          'The IT/SIWES Pass unlocks the rest.',
+      );
+    }
+
+    const result = await this.llm.generate(
+      POLISH_SYSTEM,
+      polishPrompt({
+        companyName: placement.companyName,
+        industrySector: placement.industrySector,
+        date: dto.date,
+        notes: dto.notes,
+      }),
+      1000,
+    );
+
+    await this.prisma.generationLog.create({
+      data: {
+        userId,
+        type: 'SINGLE_DAY_POLISH',
+        estimatedTokens: result.inputTokens + result.outputTokens,
+        estimatedCostKobo: estimateCostKobo(result.inputTokens, result.outputTokens),
+      },
+    });
+
+    return { activity: result.text.trim() };
   }
 
   /**
    * The "describe your whole IT" flow: extract facts from the free text, then
-   * draft one entry per open attendance day. The first `AI_TRIAL_DAYS` are
-   * generated for free; a successful IT/SIWES Pass unlocks the rest.
+   * draft one entry per open attendance day. Without a pass only the free-trial
+   * week is filled, and only while the trial is unspent; a successful IT/SIWES
+   * Pass unlocks every remaining day.
    */
   async bulkFillup(userId: string, dto: BulkFillupDto) {
     if (!this.llm.configured) {
@@ -149,6 +269,42 @@ export class LogbookService {
     }
 
     const placement = await this.placementFor(userId);
+    const hasItPass = await this.hasPass(userId, PurchaseProductType.IT_SIWES_PASS);
+
+    // Work out what (if anything) there is to fill before touching the AI: a
+    // repeat call with nothing left to do must not cost a paid generation.
+    const openDays = await this.prisma.attendanceCalendarDay.findMany({
+      where: { placementId: placement.id, confirmedAttended: true, hasLogbookEntry: false },
+      orderBy: { date: 'asc' },
+    });
+
+    // The free week is spent and there's no pass: every open day is locked.
+    if (!hasItPass && placement.trialWeekUsed) {
+      return {
+        created: 0,
+        lockedRemaining: openDays.length,
+        trial: true,
+        message: 'Your free week is used up. The IT/SIWES Pass unlocks the rest.',
+      };
+    }
+
+    // Without a pass, bulk may only fill the free-trial days — the same week
+    // single-day polish is limited to.
+    let target = openDays;
+    if (!hasItPass) {
+      const trialDays = new Set(await this.trialDayIds(placement.id));
+      target = openDays.filter((d) => trialDays.has(d.id));
+    }
+    const lockedRemaining = openDays.length - target.length;
+
+    if (target.length === 0) {
+      return {
+        created: 0,
+        lockedRemaining,
+        trial: !hasItPass,
+        message: 'Every confirmed attendance day already has an entry.',
+      };
+    }
 
     const extraction = await this.llm.generateJson<{
       school?: string | null;
@@ -156,6 +312,17 @@ export class LogbookService {
       endDate?: string | null;
       skills?: string[];
     }>(EXTRACTION_SYSTEM, extractionPrompt(dto.description), 1000);
+
+    // Extraction is its own model call, so it gets its own log line: the bulk
+    // cost stays itemised, and the spend is recorded even if generation fails.
+    await this.prisma.generationLog.create({
+      data: {
+        userId,
+        type: 'EXTRACTION',
+        estimatedTokens: extraction.inputTokens + extraction.outputTokens,
+        estimatedCostKobo: estimateCostKobo(extraction.inputTokens, extraction.outputTokens),
+      },
+    });
 
     await this.prisma.bulkFillupRequest.create({
       data: {
@@ -167,25 +334,6 @@ export class LogbookService {
         extractedSkills: Array.isArray(extraction.data.skills) ? extraction.data.skills : [],
       },
     });
-
-    const openDays = await this.prisma.attendanceCalendarDay.findMany({
-      where: { placementId: placement.id, confirmedAttended: true, hasLogbookEntry: false },
-      orderBy: { date: 'asc' },
-    });
-
-    const hasItPass = await this.hasPass(userId, PurchaseProductType.IT_SIWES_PASS);
-    const limit = hasItPass ? openDays.length : Math.min(openDays.length, AI_TRIAL_DAYS);
-    const target = openDays.slice(0, limit);
-    const lockedRemaining = openDays.length - target.length;
-
-    if (target.length === 0) {
-      return {
-        created: 0,
-        lockedRemaining,
-        trial: !hasItPass,
-        message: 'Every confirmed attendance day already has an entry.',
-      };
-    }
 
     const generation = await this.llm.generateJson<{
       entries?: { date: string; activity: string }[];
@@ -228,13 +376,14 @@ export class LogbookService {
       data: {
         userId,
         type: 'BULK_LOGBOOK',
-        estimatedTokens:
-          extraction.inputTokens +
-          extraction.outputTokens +
-          generation.inputTokens +
-          generation.outputTokens,
+        estimatedTokens: generation.inputTokens + generation.outputTokens,
+        estimatedCostKobo: estimateCostKobo(generation.inputTokens, generation.outputTokens),
       },
     });
+
+    if (!hasItPass) {
+      await this.consumeTrialIfDone(placement);
+    }
 
     return { created, lockedRemaining, trial: !hasItPass };
   }

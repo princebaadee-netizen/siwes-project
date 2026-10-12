@@ -10,6 +10,7 @@ interface ReportEntry {
   id: string;
   activity: string;
   evidenceUrl: string | null;
+  status: "DRAFT" | "REVIEWED" | "FINALIZED";
   calendarDay: { date: string };
 }
 
@@ -35,6 +36,12 @@ function fmt(iso?: string | null): string {
     year: "numeric",
   });
 }
+
+const REPORT_STATUS_LABELS: Record<ReportEntry["status"], string> = {
+  DRAFT: "Draft",
+  REVIEWED: "Reviewed",
+  FINALIZED: "Finalized",
+};
 
 export default function ReportPage() {
   const router = useRouter();
@@ -117,6 +124,19 @@ export default function ReportPage() {
     year: "numeric",
   });
 
+  // Number sections from what actually renders, so dropping an optional section
+  // never leaves a gap (e.g. 3 followed by 5, or two section 2s).
+  let section = 1;
+  const introductionNo = section++;
+  const organisationNo = placement ? section++ : null;
+  const workNo = section++;
+  const projectNo = project ? section++ : null;
+  const referencesNo = references.length > 0 ? section++ : null;
+
+  // Draft/reviewed entries are still shown (nothing is hidden), but the report
+  // flags them so they don't read as final work.
+  const unfinalized = entries.filter((e) => e.status !== "FINALIZED").length;
+
   return (
     <div className="max-w-3xl">
       <div className="mb-6 flex items-start justify-between gap-4 print:hidden">
@@ -160,7 +180,7 @@ export default function ReportPage() {
 
         {/* Introduction */}
         <section>
-          <h2 className="mb-2 font-slab text-lg font-semibold">1. Introduction</h2>
+          <h2 className="mb-2 font-slab text-lg font-semibold">{introductionNo}. Introduction</h2>
           <p className="leading-relaxed text-ink/80">
             {placement
               ? `This report presents an account of the Student Industrial Work Experience Scheme (SIWES) undertaken by ${
@@ -181,7 +201,7 @@ export default function ReportPage() {
         {/* Organisation profile */}
         {placement && (
           <section>
-            <h2 className="mb-2 font-slab text-lg font-semibold">2. Organisation Profile</h2>
+            <h2 className="mb-2 font-slab text-lg font-semibold">{organisationNo}. Organisation Profile</h2>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
               <dt className="font-medium text-ink/60">Name</dt>
               <dd>{placement.companyName || "—"}</dd>
@@ -196,7 +216,7 @@ export default function ReportPage() {
         {/* Work done */}
         <section>
           <h2 className="mb-2 font-slab text-lg font-semibold">
-            {placement ? "3. Summary of Work Done" : "2. Summary of Work Done"}
+            {workNo}. Summary of Work Done
           </h2>
           {entries.length === 0 ? (
             <p className="text-sm text-ink/60">No logbook entries recorded yet.</p>
@@ -204,9 +224,10 @@ export default function ReportPage() {
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-line text-left">
-                  <th className="w-32 py-2 pr-3 font-medium text-ink/60">Date</th>
+                  <th className="w-28 py-2 pr-3 font-medium text-ink/60">Date</th>
                   <th className="py-2 pr-3 font-medium text-ink/60">Activity</th>
-                  <th className="w-40 py-2 font-medium text-ink/60">Evidence</th>
+                  <th className="w-36 py-2 pr-3 font-medium text-ink/60">Evidence</th>
+                  <th className="w-20 py-2 font-medium text-ink/60">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -216,20 +237,29 @@ export default function ReportPage() {
                       {fmt(entry.calendarDay.date)}
                     </td>
                     <td className="py-2 pr-3 text-ink/80">{entry.activity}</td>
-                    <td className="py-2 text-xs text-forest underline underline-offset-2">
+                    <td className="py-2 pr-3 text-xs text-forest underline underline-offset-2">
                       {entry.evidenceUrl ? entry.evidenceUrl : "—"}
+                    </td>
+                    <td className="py-2 text-xs text-ink/60">
+                      {REPORT_STATUS_LABELS[entry.status] ?? entry.status}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
+          {unfinalized > 0 && (
+            <p className="mt-2 text-xs text-gold-dark">
+              {unfinalized} of {entries.length} {entries.length === 1 ? "entry is" : "entries are"} not
+              yet finalized.
+            </p>
+          )}
         </section>
 
         {/* Final year project */}
         {project && (
           <section>
-            <h2 className="mb-2 font-slab text-lg font-semibold">4. Final Year Project</h2>
+            <h2 className="mb-2 font-slab text-lg font-semibold">{projectNo}. Final Year Project</h2>
             <p className="mb-3 text-ink/80">
               <span className="font-medium text-ink/60">Title: </span>
               {project.title}
@@ -253,7 +283,7 @@ export default function ReportPage() {
         {/* References */}
         {references.length > 0 && (
           <section>
-            <h2 className="mb-2 font-slab text-lg font-semibold">5. References</h2>
+            <h2 className="mb-2 font-slab text-lg font-semibold">{referencesNo}. References</h2>
             <ol className="list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-ink/80">
               {references.map((ref) => (
                 <li key={ref.id}>{ref.formattedCitation || ref.citationText}</li>

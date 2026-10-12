@@ -4,10 +4,11 @@ import { ProjectsService } from './projects.service';
 import { PrismaService } from '../common/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { AiModule } from '../ai/ai.module';
+import { AiThrottlerGuard } from '../common/ai-throttler.guard';
 
 @Module({
   imports: [AuthModule, AiModule],
   controllers: [ProjectsController],
-  providers: [ProjectsService, PrismaService],
+  providers: [ProjectsService, PrismaService, AiThrottlerGuard],
 })
 export class ProjectsModule {}

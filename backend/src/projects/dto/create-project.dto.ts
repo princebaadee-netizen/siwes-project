@@ -1,4 +1,5 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { TopicSource } from '@prisma/client';
 
 export class CreateProjectDto {
   @IsNotEmpty()
@@ -7,4 +8,8 @@ export class CreateProjectDto {
   @IsOptional()
   @IsString()
   supervisorName?: string;
+
+  @IsOptional()
+  @IsEnum(TopicSource)
+  topicSource?: TopicSource;
 }

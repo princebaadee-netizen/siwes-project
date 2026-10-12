@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
+import { AI_TRIAL_DAYS } from '../ai/trial';
 import {
   CreatePlacementDto,
   MAX_PLACEMENT_MONTHS,
@@ -56,9 +57,15 @@ export class ItPlacementService {
       },
     });
 
-    await this.generateAttendanceCalendar(placement.id, startDate, endDate, dto.attendancePattern);
+    const calendarRebuild = await this.generateAttendanceCalendar(
+      placement.id,
+      startDate,
+      endDate,
+      dto.attendancePattern,
+    );
 
-    return this.getSummary(userId);
+    const summary = await this.getSummary(userId);
+    return { ...summary, calendarRebuild };
   }
 
   /**
@@ -97,6 +104,12 @@ export class ItPlacementService {
    * attendance pattern, and cross-references each against the federal
    * public holiday list — holiday days are flagged for the student to
    * confirm rather than assumed either way.
+   *
+   * Rebuilding is incremental: days whose date is still on the pattern keep
+   * their row (and therefore their logbook entry, holiday answer and
+   * `hasLogbookEntry` flag). Only days that fall off the pattern are deleted;
+   * the entry FK cascades with them. Returns what was dropped so the caller can
+   * warn the student instead of losing entries silently.
    */
   private async generateAttendanceCalendar(
     placementId: string,
@@ -104,17 +117,12 @@ export class ItPlacementService {
     endDate: Date,
     attendancePattern: string[],
   ) {
-    // Clear any previously generated days for this placement before regenerating
-    // (e.g. if the student edits their dates or pattern after initial setup).
-    await this.prisma.attendanceCalendarDay.deleteMany({ where: { placementId } });
-
     const holidays = await this.prisma.publicHoliday.findMany({
       where: { date: { gte: startDate, lte: endDate } },
     });
     const holidayByDate = new Map(holidays.map((h) => [h.date.toISOString().slice(0, 10), h]));
 
     const rows: {
-      placementId: string;
       date: Date;
       isAttendanceDay: boolean;
       isPublicHoliday: boolean;
@@ -130,7 +138,6 @@ export class ItPlacementService {
       const holiday = holidayByDate.get(dateKey);
 
       rows.push({
-        placementId,
         date: new Date(d),
         isAttendanceDay: true,
         isPublicHoliday: !!holiday,
@@ -141,9 +148,38 @@ export class ItPlacementService {
       });
     }
 
-    if (rows.length > 0) {
-      await this.prisma.attendanceCalendarDay.createMany({ data: rows });
-    }
+    const existing = await this.prisma.attendanceCalendarDay.findMany({
+      where: { placementId },
+      select: { id: true, date: true },
+    });
+    const existingDates = new Set(existing.map((d) => d.date.toISOString().slice(0, 10)));
+    const wantedDates = new Set(rows.map((r) => r.date.toISOString().slice(0, 10)));
+
+    const staleIds = existing
+      .filter((d) => !wantedDates.has(d.date.toISOString().slice(0, 10)))
+      .map((d) => d.id);
+
+    const removedEntries =
+      staleIds.length > 0
+        ? await this.prisma.logbookEntry.count({ where: { calendarDayId: { in: staleIds } } })
+        : 0;
+
+    // Only genuinely new dates are inserted; days that survive the edit are left
+    // untouched so their ids — and everything hanging off them — stay valid.
+    const fresh = rows.filter((r) => !existingDates.has(r.date.toISOString().slice(0, 10)));
+
+    await this.prisma.$transaction(async (tx) => {
+      if (staleIds.length > 0) {
+        await tx.attendanceCalendarDay.deleteMany({ where: { id: { in: staleIds } } });
+      }
+      if (fresh.length > 0) {
+        await tx.attendanceCalendarDay.createMany({
+          data: fresh.map((r) => ({ placementId, ...r })),
+        });
+      }
+    });
+
+    return { removedDays: staleIds.length, removedEntries };
   }
 
   /**
@@ -160,22 +196,40 @@ export class ItPlacementService {
       throw new NotFoundException('No placement has been set up yet. Complete the setup wizard to create one.');
     }
 
-    const [totalDays, holidayDays, awaitingAnswer, loggedEntries] = await Promise.all([
-      this.prisma.attendanceCalendarDay.count({ where: { placementId: placement.id } }),
-      this.prisma.attendanceCalendarDay.count({
-        where: { placementId: placement.id, isPublicHoliday: true },
-      }),
-      this.prisma.attendanceCalendarDay.count({
-        where: { placementId: placement.id, confirmedAttended: null },
-      }),
-      this.prisma.attendanceCalendarDay.count({
-        where: { placementId: placement.id, hasLogbookEntry: true },
-      }),
-    ]);
+    const [totalDays, holidayDays, awaitingAnswer, loggedEntries, trialDays] =
+      await Promise.all([
+        this.prisma.attendanceCalendarDay.count({ where: { placementId: placement.id } }),
+        this.prisma.attendanceCalendarDay.count({
+          where: { placementId: placement.id, isPublicHoliday: true },
+        }),
+        this.prisma.attendanceCalendarDay.count({
+          where: { placementId: placement.id, confirmedAttended: null },
+        }),
+        this.prisma.attendanceCalendarDay.count({
+          where: { placementId: placement.id, hasLogbookEntry: true },
+        }),
+        this.prisma.attendanceCalendarDay.findMany({
+          where: { placementId: placement.id, confirmedAttended: true },
+          orderBy: { date: 'asc' },
+          take: AI_TRIAL_DAYS,
+          select: { hasLogbookEntry: true },
+        }),
+      ]);
+
+    const trialUsed = trialDays.filter((d) => d.hasLogbookEntry).length;
+    const trial = {
+      total: AI_TRIAL_DAYS,
+      used: trialUsed,
+      // Once spent the window is closed even if entries were later deleted, so
+      // report zero remaining rather than reopening the free days.
+      remaining: placement.trialWeekUsed ? 0 : trialDays.length - trialUsed,
+      spent: placement.trialWeekUsed,
+    };
 
     return {
       ...placement,
       calendarSummary: { totalDays, holidayDays, awaitingAnswer, loggedEntries },
+      trial,
     };
   }
 

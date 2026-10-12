@@ -29,6 +29,7 @@ interface Chapter {
   status: ChapterStatus;
   isFreeUnlocked: boolean;
   content: string | null;
+  regenerationsUsed: number;
 }
 
 interface Project {
@@ -167,6 +168,7 @@ export default function ProjectPage() {
 
   async function draftChapter(chapterNumber: number) {
     if (!project) return;
+    const chapter = project.chapters.find((c) => c.chapterNumber === chapterNumber);
     const notes = (chapterNotes[chapterNumber] ?? "").trim();
     if (!notes) {
       setError("Add some notes for the AI to work from.");
@@ -175,19 +177,29 @@ export default function ProjectPage() {
     setDrafting(chapterNumber);
     setError(null);
     try {
-      const updated = await api.draftChapter(project.id, chapterNumber, notes);
+      // A chapter that already has content is being regenerated, which counts
+      // against its allowance; a blank one is a first draft.
+      const updated = chapter?.content
+        ? await api.regenerateChapter(project.id, chapterNumber, notes)
+        : await api.draftChapter(project.id, chapterNumber, notes);
       setProject((prev) =>
         prev
           ? {
               ...prev,
               chapters: prev.chapters.map((c) =>
                 c.chapterNumber === chapterNumber
-                  ? { ...c, content: updated.content, status: updated.status }
+                  ? {
+                      ...c,
+                      content: updated.content,
+                      status: updated.status,
+                      regenerationsUsed: updated.regenerationsUsed ?? c.regenerationsUsed,
+                    }
                   : c
               ),
             }
           : prev
       );
+      setError(null);
     } catch (err: any) {
       if (!handleAuthFailure(err)) {
         setError(err?.message || "Could not draft that chapter.");
@@ -422,7 +434,14 @@ export default function ProjectPage() {
                       placeholder="Bullet points or sentences the AI should turn into this chapter..."
                     />
                   </div>
-                  <div className="flex justify-end print:hidden">
+                  <div className="flex items-center justify-between gap-4 print:hidden">
+                    {ch.regenerationsUsed > 0 ? (
+                      <span className="font-mono text-xs text-ink/40">
+                        Regenerated {ch.regenerationsUsed}&times;
+                      </span>
+                    ) : (
+                      <span />
+                    )}
                     <Button
                       onClick={() => draftChapter(ch.chapterNumber)}
                       disabled={drafting === ch.chapterNumber}

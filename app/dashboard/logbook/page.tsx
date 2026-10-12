@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppStore } from "@/lib/store";
 import { Card, Button, FieldLabel, TextInput } from "@/components/ui";
-import { PenLine, Sparkles, Loader2, Trash2, CalendarCheck, Check, Printer } from "lucide-react";
+import { PenLine, Sparkles, Loader2, Trash2, CalendarCheck, Check, Printer, Pencil } from "lucide-react";
 import { api, clearToken, getToken, formatNaira } from "@/lib/api";
 
 interface CalendarDay {
@@ -16,13 +16,22 @@ interface CalendarDay {
   hasLogbookEntry: boolean;
 }
 
+type EntryStatus = "DRAFT" | "REVIEWED" | "FINALIZED";
+
 interface LogbookEntry {
   id: string;
   activity: string;
   evidenceUrl: string | null;
-  status: "DRAFT" | "REVIEWED" | "FINALIZED";
+  status: EntryStatus;
   calendarDay: { date: string };
 }
+
+const STATUS_ORDER: EntryStatus[] = ["DRAFT", "REVIEWED", "FINALIZED"];
+const STATUS_LABELS: Record<EntryStatus, string> = {
+  DRAFT: "Draft",
+  REVIEWED: "Reviewed",
+  FINALIZED: "Finalized",
+};
 
 function prettyDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", {
@@ -49,8 +58,22 @@ export default function LogbookPage() {
   const [pendingHolidays, setPendingHolidays] = useState<CalendarDay[]>([]);
   const [workedHolidays, setWorkedHolidays] = useState<Record<string, boolean>>({});
   const [savingHolidays, setSavingHolidays] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editActivity, setEditActivity] = useState("");
+  const [editEvidence, setEditEvidence] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [polishing, setPolishing] = useState(false);
+  const [aiDraft, setAiDraft] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+  const [trial, setTrial] = useState<{
+    total: number;
+    used: number;
+    remaining: number;
+    spent: boolean;
+  } | null>(null);
+  const [hasItPass, setHasItPass] = useState(false);
   const [prices, setPrices] = useState({
     IT_SIWES_PASS: 10_000,
     PROJECT_PASS: 20_000,
@@ -76,13 +99,24 @@ export default function LogbookPage() {
     }
     setLoading(true);
     try {
-      const [entryList, calendar, livePrices] = await Promise.all([
+      const [entryList, calendar, livePrices, placement, purchases] = await Promise.all([
         api.listLogbookEntries(),
         api.getCalendar(),
         api.getPrices().catch(() => null),
+        api.getMyPlacement().catch(() => null),
+        api.listPurchases().catch(() => [] as any[]),
       ]);
       setEntries(entryList);
       if (livePrices) setPrices(livePrices);
+      if (placement?.trial) setTrial(placement.trial);
+      // A successful bundle grants the IT/SIWES Pass too.
+      setHasItPass(
+        (purchases as any[]).some(
+          (p) =>
+            p.status === "SUCCESSFUL" &&
+            (p.productType === "IT_SIWES_PASS" || p.productType === "BUNDLE")
+        )
+      );
       // The backend is the only place that knows which days are real
       // attendance days, so the picker is built from its calendar rather than
       // guessed from a date input.
@@ -123,6 +157,7 @@ export default function LogbookPage() {
         date: selectedDate,
         activity: activity.trim(),
         evidenceUrl: evidenceUrl.trim() || undefined,
+        source: aiDraft ? "AI_SINGLE_DAY" : undefined,
       });
       setEntries((prev) =>
         [...prev, created].sort((a, b) => a.calendarDay.date.localeCompare(b.calendarDay.date))
@@ -131,12 +166,33 @@ export default function LogbookPage() {
       setActivity("");
       setEvidenceUrl("");
       setSelectedDate("");
+      setAiDraft(false);
     } catch (err: any) {
       if (!handleAuthFailure(err)) {
         setError(err?.message || "Could not save that entry.");
       }
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function polishEntry() {
+    if (!selectedDate || !activity.trim()) return;
+    setPolishing(true);
+    setError(null);
+    try {
+      const { activity: polished } = await api.polishLogbookEntry(
+        selectedDate,
+        activity.trim()
+      );
+      setActivity(polished);
+      setAiDraft(true);
+    } catch (err: any) {
+      if (!handleAuthFailure(err)) {
+        setError(err?.message || "Could not polish that entry.");
+      }
+    } finally {
+      setPolishing(false);
     }
   }
 
@@ -158,6 +214,61 @@ export default function LogbookPage() {
       if (!handleAuthFailure(err)) {
         setError(err?.message || "Could not delete that entry.");
       }
+    }
+  }
+
+  async function setEntryStatus(id: string, status: EntryStatus) {
+    const previous = entries.find((e) => e.id === id)?.status;
+    if (!previous || previous === status) return;
+    setUpdatingId(id);
+    setError(null);
+    // Flip the pill straight away so the tap feels instant, then reconcile with
+    // the server and roll back if it rejects the change.
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, status } : e)));
+    try {
+      await api.updateLogbookEntry(id, { status });
+    } catch (err: any) {
+      setEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, status: previous } : e))
+      );
+      if (!handleAuthFailure(err)) {
+        setError(err?.message || "Could not update that entry's status.");
+      }
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  function startEdit(entry: LogbookEntry) {
+    setEditingId(entry.id);
+    setEditActivity(entry.activity);
+    setEditEvidence(entry.evidenceUrl ?? "");
+    setError(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditActivity("");
+    setEditEvidence("");
+  }
+
+  async function saveEdit(id: string) {
+    if (!editActivity.trim()) return;
+    setSavingEdit(true);
+    setError(null);
+    try {
+      const updated = await api.updateLogbookEntry(id, {
+        activity: editActivity.trim(),
+        evidenceUrl: editEvidence.trim(),
+      });
+      setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...updated } : e)));
+      cancelEdit();
+    } catch (err: any) {
+      if (!handleAuthFailure(err)) {
+        setError(err?.message || "Could not save your changes.");
+      }
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -295,6 +406,22 @@ export default function LogbookPage() {
         </Card>
       )}
 
+      {trial && !hasItPass && (
+        <div className="mb-6 print:hidden">
+          {trial.spent ? (
+            <p className="rounded-md bg-gold/15 px-4 py-3 text-sm text-gold-dark">
+              Your free AI week is used up. New AI drafts need the IT/SIWES Pass (
+              {formatNaira(prices.IT_SIWES_PASS)}) — buy it from Account.
+            </p>
+          ) : (
+            <p className="rounded-md bg-forest/10 px-4 py-3 text-sm text-forest">
+              Free AI trial: {trial.remaining} of {trial.total} day
+              {trial.remaining === 1 ? "" : "s"} left.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="mb-6 inline-flex rounded-md border border-line bg-white p-1 print:hidden">
         <button
           onClick={() => setMode("manual")}
@@ -346,6 +473,7 @@ export default function LogbookPage() {
                       // API, so the student gets an instant message instead of a
                       // round-trip failure.
                       setSelectedDate(openDays.some((d) => d.date === value) ? value : "");
+                      setAiDraft(false);
                       if (value && !openDays.some((d) => d.date === value)) {
                         setError("That date isn't a confirmed attendance day for your placement.");
                       }
@@ -362,14 +490,34 @@ export default function LogbookPage() {
                 </datalist>
               </div>
               <div>
-                <FieldLabel>Today's activity</FieldLabel>
+                <div className="flex items-center justify-between gap-3">
+                  <FieldLabel>Today's activity</FieldLabel>
+                  <button
+                    type="button"
+                    onClick={polishEntry}
+                    disabled={polishing || saving || !selectedDate || !activity.trim()}
+                    className="focus-ring inline-flex items-center gap-1.5 text-xs font-medium text-forest underline decoration-forest/30 underline-offset-4 disabled:opacity-40"
+                  >
+                    {polishing ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Sparkles size={13} />
+                    )}
+                    {polishing ? "Polishing..." : "Polish with AI"}
+                  </button>
+                </div>
                 <textarea
                   className="focus-ring w-full rounded-md border border-line bg-white p-3.5 text-ink placeholder:text-ink/35"
                   rows={4}
                   value={activity}
                   onChange={(e) => setActivity(e.target.value)}
-                  placeholder="e.g. Assisted with configuring network switches and documented the office LAN setup."
+                  placeholder="Rough notes are fine — jot down what you did, then let AI polish it."
                 />
+                {aiDraft && (
+                  <p className="mt-1 text-xs text-forest">
+                    Polished by AI — edit it if you like, then save.
+                  </p>
+                )}
               </div>
               <div>
                 <FieldLabel>Evidence link (optional)</FieldLabel>
@@ -402,30 +550,101 @@ export default function LogbookPage() {
             <div className="space-y-3">
               {entries.map((entry) => (
                 <Card key={entry.id} className="py-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="font-mono text-xs text-ink/40">{prettyDate(entry.calendarDay.date)}</p>
-                      <p className="mt-1 text-ink">{entry.activity}</p>
-                      {entry.evidenceUrl && (
-                        <a
-                          href={entry.evidenceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-1 block truncate font-mono text-xs text-forest underline underline-offset-2"
+                  {editingId === entry.id ? (
+                    <div className="space-y-4">
+                      <p className="font-mono text-xs text-ink/40">
+                        {prettyDate(entry.calendarDay.date)}
+                      </p>
+                      <div>
+                        <FieldLabel>Activity</FieldLabel>
+                        <textarea
+                          rows={4}
+                          value={editActivity}
+                          onChange={(e) => setEditActivity(e.target.value)}
+                          className="focus-ring w-full rounded-md border border-line bg-white p-3.5 text-ink"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Evidence link (optional)</FieldLabel>
+                        <TextInput
+                          type="url"
+                          value={editEvidence}
+                          onChange={(e) => setEditEvidence(e.target.value)}
+                          placeholder="https://…"
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="ghost" onClick={cancelEdit} disabled={savingEdit}>
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={() => saveEdit(entry.id)}
+                          disabled={savingEdit || !editActivity.trim()}
                         >
-                          {entry.evidenceUrl}
-                        </a>
-                      )}
-                      <p className="mt-1.5 font-mono text-xs text-ink/40">{entry.status.toLowerCase()}</p>
+                          {savingEdit && <Loader2 size={15} className="animate-spin" />}
+                          {savingEdit ? "Saving..." : "Save changes"}
+                        </Button>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => removeEntry(entry.id)}
-                      aria-label="Delete entry"
-                      className="focus-ring rounded-md p-1.5 text-ink/40 transition-colors hover:bg-rust/10 hover:text-rust print:hidden"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="font-mono text-xs text-ink/40">{prettyDate(entry.calendarDay.date)}</p>
+                        <p className="mt-1 text-ink">{entry.activity}</p>
+                        {entry.evidenceUrl && (
+                          <a
+                            href={entry.evidenceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-1 block truncate font-mono text-xs text-forest underline underline-offset-2"
+                          >
+                            {entry.evidenceUrl}
+                          </a>
+                        )}
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="hidden font-mono text-xs text-ink/40 print:inline">
+                            {STATUS_LABELS[entry.status]}
+                          </span>
+                          <div className="inline-flex items-center rounded-md border border-line p-0.5 print:hidden">
+                            {STATUS_ORDER.map((s) => (
+                              <button
+                                key={s}
+                                type="button"
+                                disabled={updatingId === entry.id || entry.status === s}
+                                onClick={() => setEntryStatus(entry.id, s)}
+                                className={`focus-ring rounded-sm px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-default ${
+                                  entry.status === s
+                                    ? "bg-forest text-paper"
+                                    : "text-ink/50 hover:text-forest"
+                                }`}
+                              >
+                                {STATUS_LABELS[s]}
+                              </button>
+                            ))}
+                            {updatingId === entry.id && (
+                              <Loader2 size={13} className="mx-1.5 my-auto animate-spin text-ink/40" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-center gap-1 print:hidden">
+                        <button
+                          onClick={() => startEdit(entry)}
+                          aria-label="Edit entry"
+                          className="focus-ring rounded-md p-1.5 text-ink/40 transition-colors hover:bg-forest/10 hover:text-forest"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          onClick={() => removeEntry(entry.id)}
+                          aria-label="Delete entry"
+                          className="focus-ring rounded-md p-1.5 text-ink/40 transition-colors hover:bg-rust/10 hover:text-rust"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </Card>
               ))}
             </div>
@@ -454,8 +673,11 @@ export default function LogbookPage() {
           )}
           <div className="mt-4 flex items-center justify-between gap-4">
             <p className="font-mono text-xs text-ink/40">
-              Free trial: first 7 days unlocked · rest needs the IT/SIWES Pass (
-              {formatNaira(prices.IT_SIWES_PASS)})
+              {hasItPass
+                ? "IT/SIWES Pass active — draft as many days as you like."
+                : trial?.spent
+                  ? `Free AI week used up · the IT/SIWES Pass (${formatNaira(prices.IT_SIWES_PASS)}) unlocks the rest.`
+                  : `Free trial: ${trial?.remaining ?? 7} of ${trial?.total ?? 7} AI days left · rest needs the IT/SIWES Pass (${formatNaira(prices.IT_SIWES_PASS)}).`}
             </p>
             <Button onClick={runBulkFillup} disabled={generating || !bulkText.trim()}>
               {generating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}

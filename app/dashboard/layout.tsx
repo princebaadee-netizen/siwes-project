@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutGrid, BookText, FileText, GraduationCap, User, LogOut, MailWarning } from "lucide-react";
+import { LayoutGrid, BookText, FileText, GraduationCap, User, LogOut, MailWarning, ShieldCheck } from "lucide-react";
 import { ReactNode, useEffect, useState } from "react";
 import { api, clearToken, getToken } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
@@ -21,6 +21,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { hydrated } = useAppStore();
   const [authorised, setAuthorised] = useState(false);
   const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [resent, setResent] = useState(false);
   const [resending, setResending] = useState(false);
 
@@ -41,7 +42,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     if (!authorised) return;
     api
       .getMe()
-      .then((me) => setEmailVerified(me.emailVerified ?? true))
+      .then((me) => {
+        setEmailVerified(me.emailVerified ?? true);
+        setIsAdmin(!!me.isAdmin);
+      })
       .catch(() => setEmailVerified(true));
   }, [authorised]);
 
@@ -64,6 +68,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   if (!hydrated || !authorised) return null;
 
+  const navTabs = isAdmin
+    ? [...tabs, { href: "/dashboard/admin/topics", label: "Topic bank", icon: ShieldCheck }]
+    : tabs;
+
   return (
     <div className="min-h-screen bg-paper">
       <div className="mx-auto flex max-w-5xl print:block print:max-w-none">
@@ -72,7 +80,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <div className="mb-8 hidden font-slab text-lg font-semibold text-forest sm:block sm:px-3">
             Logbook
           </div>
-          {tabs.map((tab) => {
+          {navTabs.map((tab) => {
             const active = pathname === tab.href;
             const Icon = tab.icon;
             return (

@@ -1,16 +1,20 @@
 import {
+  BadGatewayException,
   BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { PurchaseProductType } from '@prisma/client';
+import { PurchaseProductType, TopicSource } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { LlmService } from '../ai/llm.service';
+import { estimateCostKobo } from '../ai/token-cost';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { CreateReferenceDto } from './dto/create-reference.dto';
+import { SuggestTopicsDto } from './dto/suggest-topics.dto';
 import { CHAPTER_SYSTEM, chapterPrompt } from './chapter.prompt';
+import { TOPIC_SUGGEST_SYSTEM, topicSuggestPrompt } from './topic-suggest.prompt';
 import { checkReference } from './reference-verifier';
 
 const CHAPTER_TITLES = [
@@ -20,6 +24,8 @@ const CHAPTER_TITLES = [
   'Implementation & Results',
   'Summary & Conclusion',
 ];
+
+const TOPIC_SUGGESTION_COUNT = 5;
 
 @Injectable()
 export class ProjectsService {
@@ -47,6 +53,7 @@ export class ProjectsService {
         userId,
         title: dto.title,
         supervisorName: dto.supervisorName,
+        topicSource: dto.topicSource ?? TopicSource.MANUAL,
         chapters: {
           create: CHAPTER_TITLES.map((title, i) => ({
             chapterNumber: i + 1,
@@ -60,6 +67,65 @@ export class ProjectsService {
     return project;
   }
 
+  /**
+   * Suggests project topics tailored to the student's field. Not gated behind a
+   * pass (it is a small call meant to help before any project exists) but it is
+   * accounted for like every other model call and rate-limited per account.
+   */
+  async suggestTopics(userId: string, dto: SuggestTopicsDto) {
+    if (!this.llm.configured) {
+      throw new ServiceUnavailableException(
+        'AI topic suggestions are not configured. Set ANTHROPIC_API_KEY on the backend.',
+      );
+    }
+
+    // Fall back to the department recorded at signup so suggestions stay
+    // relevant even when the student does not name a field.
+    const field =
+      dto.field?.trim() || (await this.userDepartment(userId)) || 'Computer Science';
+
+    const { data, inputTokens, outputTokens } = await this.llm.generateJson<{
+      topics?: { title?: unknown; description?: unknown }[];
+    }>(
+      TOPIC_SUGGEST_SYSTEM,
+      topicSuggestPrompt({ field, interests: dto.interests, count: TOPIC_SUGGESTION_COUNT }),
+      1500,
+    );
+
+    const topics = Array.isArray(data?.topics)
+      ? data.topics
+          .map((t) => ({
+            title: typeof t?.title === 'string' ? t.title.trim() : '',
+            description: typeof t?.description === 'string' ? t.description.trim() : '',
+          }))
+          .filter((t) => t.title)
+          .slice(0, TOPIC_SUGGESTION_COUNT)
+      : [];
+
+    if (topics.length === 0) {
+      throw new BadGatewayException('The AI did not return any topics. Please try again.');
+    }
+
+    await this.prisma.generationLog.create({
+      data: {
+        userId,
+        type: 'TOPIC_SUGGESTION',
+        estimatedTokens: inputTokens + outputTokens,
+        estimatedCostKobo: estimateCostKobo(inputTokens, outputTokens),
+      },
+    });
+
+    return { field, topics };
+  }
+
+  private async userDepartment(userId: string): Promise<string | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { department: true },
+    });
+    return user?.department?.trim() || null;
+  }
+
   async findMineOrThrow(userId: string, projectId: string) {
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, userId },
@@ -67,6 +133,16 @@ export class ProjectsService {
     });
     if (!project) throw new NotFoundException('Project not found');
     return project;
+  }
+
+  /**
+   * Each chapter is a fresh AI call, so regeneration is bounded to keep a
+   * single student from running up unbounded generation cost. Tunable with
+   * AI_MAX_REGENERATIONS; defaults to 3.
+   */
+  private maxRegenerations(): number {
+    const raw = Number(process.env.AI_MAX_REGENERATIONS);
+    return Number.isFinite(raw) && raw >= 0 ? raw : 3;
   }
 
   /**
@@ -78,6 +154,47 @@ export class ProjectsService {
     projectId: string,
     chapterNumber: number,
     rawInputText: string,
+  ) {
+    return this.writeChapter(userId, projectId, chapterNumber, rawInputText, false);
+  }
+
+  /**
+   * Re-runs the AI on a chapter that already has content (or new notes). Unlike
+   * a first draft this counts against the chapter's regeneration allowance.
+   */
+  async regenerateChapter(
+    userId: string,
+    projectId: string,
+    chapterNumber: number,
+    rawInputText?: string,
+  ) {
+    const project = await this.findMineOrThrow(userId, projectId);
+    const chapter = project.chapters.find((c) => c.chapterNumber === chapterNumber);
+    if (!chapter) throw new NotFoundException('Chapter not found');
+
+    const max = this.maxRegenerations();
+    if (chapter.regenerationsUsed >= max) {
+      throw new ForbiddenException(
+        `This chapter has reached its limit of ${max} regenerations.`,
+      );
+    }
+
+    // Fall back to the notes the chapter was last drafted from, so a plain
+    // "regenerate" tap works without the client resending them.
+    const notes = (rawInputText ?? chapter.rawInputText ?? '').trim();
+    if (!notes) {
+      throw new BadRequestException('Add some notes before regenerating this chapter.');
+    }
+
+    return this.writeChapter(userId, projectId, chapterNumber, notes, true);
+  }
+
+  private async writeChapter(
+    userId: string,
+    projectId: string,
+    chapterNumber: number,
+    rawInputText: string,
+    isRegeneration: boolean,
   ) {
     if (!this.llm.configured) {
       throw new ServiceUnavailableException(
@@ -113,7 +230,12 @@ export class ProjectsService {
 
     const updated = await this.prisma.projectChapter.update({
       where: { id: chapter.id },
-      data: { rawInputText, content: result.text.trim(), status: 'DRAFT' },
+      data: {
+        rawInputText,
+        content: result.text.trim(),
+        status: 'DRAFT',
+        ...(isRegeneration ? { regenerationsUsed: { increment: 1 } } : {}),
+      },
     });
 
     await this.prisma.generationLog.create({
@@ -121,6 +243,7 @@ export class ProjectsService {
         userId,
         type: 'CHAPTER_DRAFT',
         estimatedTokens: result.inputTokens + result.outputTokens,
+        estimatedCostKobo: estimateCostKobo(result.inputTokens, result.outputTokens),
       },
     });
 

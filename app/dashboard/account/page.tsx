@@ -2,15 +2,33 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, CheckCircle2 } from "lucide-react";
+import { Loader2, CheckCircle2, Sparkles } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { Card, FieldLabel, TextInput, Button } from "@/components/ui";
 import { AttendancePicker } from "@/components/attendance-picker";
-import { api, clearToken, getToken, formatNaira } from "@/lib/api";
+import {
+  api,
+  clearToken,
+  getToken,
+  formatNaira,
+  formatKobo,
+  ProjectTopic,
+  SuggestedTopic,
+  TopicSource,
+  UsageSummary,
+} from "@/lib/api";
 import { applyProfile } from "@/lib/sync";
 import { Weekday } from "@/lib/types";
 
 type BackendModule = "LOGBOOK" | "PROJECT" | "BOTH";
+
+const GENERATION_LABELS: Record<string, string> = {
+  EXTRACTION: "Text extraction",
+  BULK_LOGBOOK: "Logbook bulk fill-up",
+  CHAPTER_DRAFT: "Chapter draft",
+  SINGLE_DAY_POLISH: "Single-day polish",
+  TOPIC_SUGGESTION: "Topic suggestions",
+};
 
 const MODULE_OPTIONS: { id: BackendModule; title: string; desc: string }[] = [
   { id: "LOGBOOK", title: "IT/SIWES logbook only", desc: "Fill your logbook and write your SIWES report." },
@@ -30,7 +48,9 @@ export default function AccountPage() {
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [purchases, setPurchases] = useState<any[]>([]);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
   const [prices, setPrices] = useState({
     IT_SIWES_PASS: 10_000,
@@ -61,6 +81,19 @@ export default function AccountPage() {
   const [hasProject, setHasProject] = useState(false);
   const [projectTitle, setProjectTitle] = useState("");
   const [supervisorName, setSupervisorName] = useState("");
+  const [topicSource, setTopicSource] = useState<TopicSource>("MANUAL");
+
+  // Topic bank
+  const [showTopicBank, setShowTopicBank] = useState(false);
+  const [topicFields, setTopicFields] = useState<string[]>([]);
+  const [topicField, setTopicField] = useState("");
+  const [topicQuery, setTopicQuery] = useState("");
+  const [topics, setTopics] = useState<ProjectTopic[]>([]);
+  const [topicsLoading, setTopicsLoading] = useState(false);
+  const [suggestInterests, setSuggestInterests] = useState("");
+  const [suggestions, setSuggestions] = useState<SuggestedTopic[]>([]);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestedField, setSuggestedField] = useState("");
 
   const handleAuthFailure = useCallback(
     (err: any) => {
@@ -86,6 +119,9 @@ export default function AccountPage() {
       const livePrices = await api.getPrices().catch(() => null);
       if (livePrices) setPrices(livePrices);
 
+      const liveUsage = await api.getUsage().catch(() => null);
+      if (liveUsage) setUsage(liveUsage);
+
       setFullName(me.fullName ?? "");
       setEmail(me.email ?? "");
       setSchool(me.school ?? "");
@@ -110,6 +146,7 @@ export default function AccountPage() {
         setHasProject(true);
         setProjectTitle(proj.title ?? "");
         setSupervisorName(proj.supervisorName ?? "");
+        setTopicSource(proj.topicSource ?? "MANUAL");
       }
     } catch (err: any) {
       if (!handleAuthFailure(err)) {
@@ -123,6 +160,40 @@ export default function AccountPage() {
   useEffect(() => {
     if (hydrated) load();
   }, [hydrated, load]);
+
+  // Load the bank's field list the first time the picker is opened.
+  useEffect(() => {
+    if (!showTopicBank || topicFields.length > 0) return;
+    let ignore = false;
+    api
+      .listTopicFields()
+      .catch(() => [])
+      .then((fields) => {
+        if (!ignore) setTopicFields(Array.isArray(fields) ? fields : []);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [showTopicBank, topicFields.length]);
+
+  // Fetch topics whenever the picker is open or its filters change.
+  useEffect(() => {
+    if (!showTopicBank) return;
+    let ignore = false;
+    setTopicsLoading(true);
+    api
+      .listTopics({ field: topicField || undefined, q: topicQuery.trim() || undefined })
+      .catch(() => [])
+      .then((list) => {
+        if (!ignore) setTopics(Array.isArray(list) ? list : []);
+      })
+      .finally(() => {
+        if (!ignore) setTopicsLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [showTopicBank, topicField, topicQuery]);
 
   // Paystack redirects back here with ?reference=/ ?trxref= after checkout.
   // Verify it server-side, refresh the account, then strip the query string so
@@ -227,8 +298,9 @@ export default function AccountPage() {
     setSaving("placement");
     setError(null);
     setSuccess(null);
+    setWarning(null);
     try {
-      await api.createPlacement({
+      const result = await api.createPlacement({
         companyName: companyName.trim(),
         companyAddress: companyAddress.trim() || undefined,
         industrySector: industrySector.trim() || undefined,
@@ -238,11 +310,53 @@ export default function AccountPage() {
         attendancePattern,
       });
       setHasPlacement(true);
-      flash("Placement saved and your attendance calendar rebuilt.");
+      const removed = result?.calendarRebuild?.removedEntries ?? 0;
+      if (removed > 0) {
+        // The rebuild keeps every day still on the pattern; only days that fell
+        // off it are dropped, taking their entries with them. Say so, loudly.
+        setWarning(
+          `Placement saved, but ${removed} logbook ${
+            removed === 1 ? "entry was" : "entries were"
+          } removed because ${removed === 1 ? "its day is" : "those days are"} no longer on your attendance pattern.`
+        );
+      } else {
+        flash("Placement saved and your attendance calendar rebuilt.");
+      }
     } catch (err: any) {
       if (!handleAuthFailure(err)) setError(err?.message || "Could not save your placement.");
     } finally {
       setSaving(null);
+    }
+  }
+
+  function chooseTopic(topic: ProjectTopic) {
+    setProjectTitle(topic.title);
+    setTopicSource("BANK");
+    setShowTopicBank(false);
+  }
+
+  function chooseSuggestion(topic: SuggestedTopic) {
+    setProjectTitle(topic.title);
+    setTopicSource("AI_SUGGESTED");
+    setShowTopicBank(false);
+  }
+
+  async function runSuggestTopics() {
+    setSuggesting(true);
+    setError(null);
+    try {
+      const result = await api.suggestTopics({
+        field: topicField.trim() || undefined,
+        interests: suggestInterests.trim() || undefined,
+      });
+      setSuggestions(result.topics);
+      setSuggestedField(result.field);
+    } catch (err: any) {
+      if (!handleAuthFailure(err)) {
+        setError(err?.message || "Could not get topic suggestions.");
+      }
+    } finally {
+      setSuggesting(false);
     }
   }
 
@@ -258,6 +372,7 @@ export default function AccountPage() {
       await api.createProject({
         title: projectTitle.trim(),
         supervisorName: supervisorName.trim() || undefined,
+        topicSource,
       });
       setHasProject(true);
       flash("Project saved.");
@@ -306,6 +421,9 @@ export default function AccountPage() {
       )}
       {error && (
         <p className="rounded-md bg-rust/10 px-4 py-3 text-sm text-rust">{error}</p>
+      )}
+      {warning && (
+        <p className="rounded-md bg-gold/15 px-4 py-3 text-sm text-gold-dark">{warning}</p>
       )}
 
       <Card className="space-y-4">
@@ -448,6 +566,9 @@ export default function AccountPage() {
               <p className="text-sm text-ink/60">
                 Supervisor: {supervisorName || "—"}
               </p>
+              {topicSource === "BANK" && (
+                <p className="text-xs font-medium text-forest">Picked from the topic bank</p>
+              )}
               <p className="pt-2 text-sm text-ink/50">
                 View your chapters and track progress on the Project tab.
               </p>
@@ -458,10 +579,146 @@ export default function AccountPage() {
                 <FieldLabel>Project title / topic</FieldLabel>
                 <TextInput
                   value={projectTitle}
-                  onChange={(e) => setProjectTitle(e.target.value)}
+                  onChange={(e) => {
+                    setProjectTitle(e.target.value);
+                    setTopicSource("MANUAL");
+                  }}
                   placeholder="e.g. Design of an Online Result Checking System"
                 />
+                {topicSource === "BANK" && (
+                  <p className="mt-1 text-xs font-medium text-forest">
+                    Picked from the topic bank
+                  </p>
+                )}
+                {topicSource === "AI_SUGGESTED" && (
+                  <p className="mt-1 text-xs font-medium text-forest">AI-suggested topic</p>
+                )}
               </div>
+
+              <div className="rounded-lg border border-line bg-white/60 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-ink">Not settled on a topic?</p>
+                    <p className="text-sm text-ink/60">
+                      Browse the topic bank and pick one.
+                    </p>
+                  </div>
+                  <Button variant="outline" onClick={() => setShowTopicBank((v) => !v)}>
+                    {showTopicBank ? "Close" : "Browse topics"}
+                  </Button>
+                </div>
+
+                {showTopicBank && (
+                  <div className="mt-4 space-y-3 border-t border-line pt-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <FieldLabel>Field</FieldLabel>
+                        <select
+                          value={topicField}
+                          onChange={(e) => setTopicField(e.target.value)}
+                          className="focus-ring w-full rounded-md border border-line bg-white px-3.5 py-2.5 text-ink"
+                        >
+                          <option value="">All fields</option>
+                          {topicFields.map((f) => (
+                            <option key={f} value={f}>
+                              {f}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <FieldLabel>Search</FieldLabel>
+                        <TextInput
+                          value={topicQuery}
+                          onChange={(e) => setTopicQuery(e.target.value)}
+                          placeholder="e.g. attendance, phishing"
+                        />
+                      </div>
+                    </div>
+
+                    {topicsLoading ? (
+                      <p className="flex items-center gap-2 text-sm text-ink/50">
+                        <Loader2 size={14} className="animate-spin" /> Loading topics...
+                      </p>
+                    ) : topics.length === 0 ? (
+                      <p className="text-sm text-ink/50">No topics match that search.</p>
+                    ) : (
+                      <ul className="max-h-80 space-y-2 overflow-y-auto">
+                        {topics.map((topic) => (
+                          <li key={topic.id}>
+                            <button
+                              type="button"
+                              onClick={() => chooseTopic(topic)}
+                              className="focus-ring w-full rounded-md border border-line bg-white p-3 text-left transition-colors hover:border-forest/40"
+                            >
+                              <span className="block font-medium text-ink">{topic.title}</span>
+                              <span className="mt-0.5 block font-mono text-xs text-forest/70">
+                                {topic.field}
+                              </span>
+                              {topic.description && (
+                                <span className="mt-1 block text-sm text-ink/60">
+                                  {topic.description}
+                                </span>
+                              )}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <div className="space-y-3 border-t border-line pt-4">
+                      <div>
+                        <p className="text-sm font-medium text-ink">Or let AI suggest topics</p>
+                        <p className="text-sm text-ink/60">
+                          Proposes a few ideas from {topicField ? `the ${topicField} field` : "your department"}.
+                        </p>
+                      </div>
+                      <div>
+                        <FieldLabel>Your interests (optional)</FieldLabel>
+                        <TextInput
+                          value={suggestInterests}
+                          onChange={(e) => setSuggestInterests(e.target.value)}
+                          placeholder="e.g. attendance tracking, machine learning"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-mono text-xs text-ink/40">
+                          {suggestedField && suggestions.length > 0 ? `Field: ${suggestedField}` : ""}
+                        </p>
+                        <Button variant="outline" onClick={runSuggestTopics} disabled={suggesting}>
+                          {suggesting ? (
+                            <Loader2 size={15} className="animate-spin" />
+                          ) : (
+                            <Sparkles size={15} />
+                          )}
+                          {suggesting ? "Thinking..." : "Suggest topics"}
+                        </Button>
+                      </div>
+                      {suggestions.length > 0 && (
+                        <ul className="space-y-2">
+                          {suggestions.map((t, i) => (
+                            <li key={`${t.title}-${i}`}>
+                              <button
+                                type="button"
+                                onClick={() => chooseSuggestion(t)}
+                                className="focus-ring w-full rounded-md border border-gold/40 bg-gold/5 p-3 text-left transition-colors hover:border-gold"
+                              >
+                                <span className="block font-medium text-ink">{t.title}</span>
+                                {t.description && (
+                                  <span className="mt-1 block text-sm text-ink/60">
+                                    {t.description}
+                                  </span>
+                                )}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <FieldLabel>Supervisor's name (optional)</FieldLabel>
                 <TextInput
@@ -518,6 +775,54 @@ export default function AccountPage() {
           );
         })}
       </Card>
+
+      {usage && usage.totals.generations > 0 && (
+        <Card className="space-y-4">
+          <div>
+            <h2 className="font-medium text-ink">AI usage</h2>
+            <p className="mt-1 text-sm text-ink/60">
+              How much AI drafting you've used, with an estimated cost.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="rounded-lg bg-line/15 px-3 py-2.5">
+              <p className="font-slab text-xl font-semibold text-ink">
+                {usage.totals.generations}
+              </p>
+              <p className="text-xs text-ink/50">generations</p>
+            </div>
+            <div className="rounded-lg bg-line/15 px-3 py-2.5">
+              <p className="font-slab text-xl font-semibold text-ink">
+                {usage.totals.tokens.toLocaleString("en-NG")}
+              </p>
+              <p className="text-xs text-ink/50">tokens</p>
+            </div>
+            <div className="rounded-lg bg-line/15 px-3 py-2.5">
+              <p className="font-slab text-xl font-semibold text-ink">
+                {formatKobo(usage.totals.costKobo)}
+              </p>
+              <p className="text-xs text-ink/50">est. cost</p>
+            </div>
+          </div>
+
+          <ul className="divide-y divide-line">
+            {usage.byType.map((row) => (
+              <li key={row.type} className="flex items-center justify-between py-2.5 text-sm">
+                <span className="text-ink">{GENERATION_LABELS[row.type] ?? row.type}</span>
+                <span className="text-ink/60">
+                  {row.generations} × · {row.tokens.toLocaleString("en-NG")} tokens ·{" "}
+                  {formatKobo(row.costKobo)}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <p className="text-xs text-ink/40">
+            Costs are estimates based on token counts, not a bill.
+          </p>
+        </Card>
+      )}
     </div>
   );
 }

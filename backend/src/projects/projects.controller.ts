@@ -1,10 +1,14 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AiThrottlerGuard } from '../common/ai-throttler.guard';
 import { CurrentUserId } from '../auth/current-user.decorator';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { DraftChapterDto } from './dto/draft-chapter.dto';
+import { RegenerateChapterDto } from './dto/regenerate-chapter.dto';
 import { CreateReferenceDto } from './dto/create-reference.dto';
+import { SuggestTopicsDto } from './dto/suggest-topics.dto';
 import { PrismaService } from '../common/prisma.service';
 
 @Controller('projects')
@@ -20,6 +24,15 @@ export class ProjectsController {
     return this.projectsService.create(userId, dto);
   }
 
+  // A paid model call, so it carries the same per-account cap as the other AI
+  // routes. It is a static path, so it never collides with the `:id` routes.
+  @Post('suggest-topics')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(AiThrottlerGuard)
+  suggestTopics(@CurrentUserId() userId: string, @Body() dto: SuggestTopicsDto) {
+    return this.projectsService.suggestTopics(userId, dto);
+  }
+
   @Get()
   findMine(@CurrentUserId() userId: string) {
     return this.prisma.project.findMany({
@@ -33,7 +46,11 @@ export class ProjectsController {
     return this.projectsService.findMineOrThrow(userId, id);
   }
 
+  // AI-backed routes: capped below the global limit since each one costs a
+  // paid model call.
   @Post(':id/chapters/:chapterNumber/draft')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(AiThrottlerGuard)
   draftChapter(
     @CurrentUserId() userId: string,
     @Param('id') id: string,
@@ -41,6 +58,18 @@ export class ProjectsController {
     @Body() dto: DraftChapterDto,
   ) {
     return this.projectsService.draftChapter(userId, id, chapterNumber, dto.rawInputText);
+  }
+
+  @Post(':id/chapters/:chapterNumber/regenerate')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(AiThrottlerGuard)
+  regenerateChapter(
+    @CurrentUserId() userId: string,
+    @Param('id') id: string,
+    @Param('chapterNumber', ParseIntPipe) chapterNumber: number,
+    @Body() dto: RegenerateChapterDto,
+  ) {
+    return this.projectsService.regenerateChapter(userId, id, chapterNumber, dto.rawInputText);
   }
 
   @Get(':id/references')

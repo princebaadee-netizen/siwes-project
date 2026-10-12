@@ -64,6 +64,42 @@ export interface AuthResponse {
   user: { id: string; email: string; fullName: string; emailVerified: boolean };
 }
 
+export type TopicSource = "MANUAL" | "BANK" | "AI_SUGGESTED";
+
+export interface ProjectTopic {
+  id: string;
+  title: string;
+  field: string;
+  description: string | null;
+}
+
+export interface SuggestedTopic {
+  title: string;
+  description: string;
+}
+
+export type GenerationType =
+  | "EXTRACTION"
+  | "BULK_LOGBOOK"
+  | "CHAPTER_DRAFT"
+  | "SINGLE_DAY_POLISH"
+  | "TOPIC_SUGGESTION";
+
+export interface UsageEntry {
+  id: string;
+  type: GenerationType;
+  estimatedTokens: number | null;
+  estimatedCostKobo: number | null;
+  createdAt: string;
+}
+
+export interface UsageSummary {
+  totals: { generations: number; tokens: number; costKobo: number };
+  byType: { type: GenerationType; generations: number; tokens: number; costKobo: number }[];
+  recent: UsageEntry[];
+  pricing: { inputKoboPerMtok: number; outputKoboPerMtok: number };
+}
+
 export const api = {
   signup: (fullName: string, email: string, password: string) =>
     request<AuthResponse>("/auth/signup", {
@@ -133,8 +169,18 @@ export const api = {
 
   listLogbookEntries: () => request<any[]>("/logbook"),
 
-  createLogbookEntry: (data: { date: string; activity: string; evidenceUrl?: string }) =>
-    request<any>("/logbook", { method: "POST", body: JSON.stringify(data) }),
+  createLogbookEntry: (data: {
+    date: string;
+    activity: string;
+    evidenceUrl?: string;
+    source?: "MANUAL" | "AI_SINGLE_DAY";
+  }) => request<any>("/logbook", { method: "POST", body: JSON.stringify(data) }),
+
+  polishLogbookEntry: (date: string, notes: string) =>
+    request<{ activity: string }>("/logbook/polish", {
+      method: "POST",
+      body: JSON.stringify({ date, notes }),
+    }),
 
   updateLogbookEntry: (id: string, data: { activity?: string; evidenceUrl?: string; status?: string }) =>
     request<any>(`/logbook/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
@@ -147,8 +193,44 @@ export const api = {
       { method: "POST", body: JSON.stringify({ description }) }
     ),
 
-  createProject: (data: { title: string; supervisorName?: string }) =>
+  createProject: (data: { title: string; supervisorName?: string; topicSource?: TopicSource }) =>
     request<any>("/projects", { method: "POST", body: JSON.stringify(data) }),
+
+  listTopics: (params?: { field?: string; q?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.field) query.set("field", params.field);
+    if (params?.q) query.set("q", params.q);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<ProjectTopic[]>(`/topics${suffix}`);
+  },
+
+  listTopicFields: () => request<string[]>("/topics/fields"),
+
+  adminListTopics: () => request<ProjectTopic[]>("/admin/topics"),
+
+  createTopic: (data: { title: string; field: string; description?: string }) =>
+    request<ProjectTopic>("/admin/topics", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateTopic: (
+    id: string,
+    data: { title?: string; field?: string; description?: string },
+  ) =>
+    request<ProjectTopic>(`/admin/topics/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteTopic: (id: string) =>
+    request<{ ok: boolean }>(`/admin/topics/${id}`, { method: "DELETE" }),
+
+  suggestTopics: (params?: { field?: string; interests?: string }) =>
+    request<{ field: string; topics: SuggestedTopic[] }>("/projects/suggest-topics", {
+      method: "POST",
+      body: JSON.stringify(params ?? {}),
+    }),
 
   getMyProjects: () => request<any[]>("/projects"),
 
@@ -161,6 +243,12 @@ export const api = {
 
   draftChapter: (projectId: string, chapterNumber: number, rawInputText: string) =>
     request<any>(`/projects/${projectId}/chapters/${chapterNumber}/draft`, {
+      method: "POST",
+      body: JSON.stringify({ rawInputText }),
+    }),
+
+  regenerateChapter: (projectId: string, chapterNumber: number, rawInputText?: string) =>
+    request<any>(`/projects/${projectId}/chapters/${chapterNumber}/regenerate`, {
       method: "POST",
       body: JSON.stringify({ rawInputText }),
     }),
@@ -197,11 +285,19 @@ export const api = {
 
   getPrices: () =>
     request<{ IT_SIWES_PASS: number; PROJECT_PASS: number; BUNDLE: number }>("/payments/prices"),
+
+  getUsage: (limit?: number) =>
+    request<UsageSummary>(`/usage${limit ? `?limit=${limit}` : ""}`),
 };
 
 /** Prices come from the backend in naira; render them as ₦10,000. */
 export function formatNaira(naira: number): string {
   return `₦${Math.round(naira).toLocaleString("en-NG")}`;
+}
+
+/** AI spend is stored and returned in kobo (₦1 = 100 kobo). */
+export function formatKobo(kobo: number): string {
+  return formatNaira(kobo / 100);
 }
 
 export { ApiError };
