@@ -9,79 +9,125 @@ export interface LlmResult {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  finishReason?: string;
 }
 
 /**
- * A thin wrapper over the Anthropic Messages API. It deliberately uses the
- * global `fetch` rather than an SDK: the backend already targets Node 18+,
- * so there is no dependency to install or keep pinned, and swapping in a
- * different provider later only touches this one file.
+ * A thin wrapper over Groq's OpenAI-compatible Chat Completions API. It
+ * deliberately uses the global `fetch` rather than an SDK: the backend already
+ * targets Node 18+, so there is no dependency to install or keep pinned, and
+ * swapping in a different provider later only touches this one file.
+ *
+ * Groq's free tier needs no credit card: sign up at https://console.groq.com,
+ * create an API key and set GROQ_API_KEY. The default model is served on the
+ * free tier; change it with AI_MODEL (see the Groq model catalogue for ids).
  */
 @Injectable()
 export class LlmService {
   private readonly logger = new Logger(LlmService.name);
 
   private get apiKey(): string | undefined {
-    return process.env.ANTHROPIC_API_KEY;
+    return process.env.GROQ_API_KEY;
   }
 
   private get model(): string {
-    return process.env.AI_MODEL ?? 'claude-sonnet-4-5';
+    return process.env.AI_MODEL ?? 'openai/gpt-oss-120b';
   }
 
   get configured(): boolean {
     return !!this.apiKey;
   }
 
-  async generate(system: string, prompt: string, maxTokens = 4000): Promise<LlmResult> {
+  private readonly maxRateRetries = 4;
+
+  async generate(
+    system: string,
+    prompt: string,
+    maxTokens = 4000,
+    json = false,
+  ): Promise<LlmResult> {
     if (!this.apiKey) {
       throw new ServiceUnavailableException(
-        'AI features are not configured. Set ANTHROPIC_API_KEY on the backend to enable them.',
+        'AI features are not configured. Set GROQ_API_KEY on the backend to enable them.',
       );
     }
 
+    const isGptOss = this.model.toLowerCase().startsWith('openai/gpt-oss');
+
     let res: Response;
-    try {
-      res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: this.model,
-          max_tokens: maxTokens,
-          system,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      });
-    } catch (err) {
-      // Network-level failure (DNS, timeout, no egress). Don't leak the raw
-      // error to the student — it is not something they can act on.
-      this.logger.error('AI request could not be sent', err as Error);
-      throw new BadGatewayException('Could not reach the AI service. Please try again.');
+    let body: any = null;
+    for (let attempt = 0; attempt <= this.maxRateRetries; attempt++) {
+      try {
+        res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: this.model,
+            max_tokens: maxTokens,
+            // JSON mode forces a syntactically valid JSON reply, which keeps the
+            // extraction, bulk-fill-up and topic-suggestion flows from being
+            // tripped up by stray prose. The prompts already say "JSON".
+            ...(json ? { response_format: { type: 'json_object' } } : {}),
+            // gpt-oss is a reasoning model; low effort keeps its hidden
+            // reasoning tokens small so more of the per-minute budget goes to
+            // actual logbook/project text (and fewer 429s on the free tier).
+            ...(isGptOss ? { reasoning_effort: 'low' } : {}),
+            messages: [
+              { role: 'system', content: system },
+              { role: 'user', content: prompt },
+            ],
+          }),
+        });
+      } catch (err) {
+        // Network-level failure (DNS, timeout, no egress). Don't leak the raw
+        // error to the student — it is not something they can act on.
+        this.logger.error('AI request could not be sent', err as Error);
+        throw new BadGatewayException('Could not reach the AI service. Please try again.');
+      }
+
+      body = await res.json().catch(() => null);
+
+      // The free tier throttles by tokens per minute. Hold off for the wait the
+      // API asked for, then retry, so a long bulk fill-up survives a burst.
+      if (res.status !== 429 || attempt >= this.maxRateRetries) break;
+      const waitMs = this.rateLimitWait(res, body);
+      this.logger.warn(`AI rate limit hit, retrying after ${waitMs}ms`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
 
-    const body: any = await res.json().catch(() => null);
-    if (!res.ok) {
-      const detail = body?.error?.message ?? `AI service returned HTTP ${res.status}`;
-      this.logger.error(`AI service error ${res.status}: ${detail}`);
+    if (!res!.ok) {
+      const detail = body?.error?.message ?? `AI service returned HTTP ${res!.status}`;
+      this.logger.error(`AI service error ${res!.status}: ${detail}`);
       throw new BadGatewayException(`AI service error: ${detail}`);
     }
 
-    const text = Array.isArray(body?.content)
-      ? body.content
-          .filter((block: any) => block?.type === 'text')
-          .map((block: any) => block.text)
-          .join('\n')
-      : '';
+    const text =
+      typeof body?.choices?.[0]?.message?.content === 'string'
+        ? body.choices[0].message.content
+        : '';
 
     return {
       text,
-      inputTokens: body?.usage?.input_tokens ?? 0,
-      outputTokens: body?.usage?.output_tokens ?? 0,
+      inputTokens: body?.usage?.prompt_tokens ?? 0,
+      outputTokens: body?.usage?.completion_tokens ?? 0,
+      finishReason: body?.choices?.[0]?.finish_reason,
     };
+  }
+
+  /**
+   * How long to wait before retrying a 429. Prefers the HTTP `Retry-After`
+   * header, then a "…in {n}s…" phrase inside the API's error message.
+   */
+  private rateLimitWait(res: Response, body: any): number {
+    const header = res.headers.get('retry-after');
+    const fromHeader = header ? Number(header) : NaN;
+    if (Number.isFinite(fromHeader) && fromHeader > 0) return fromHeader * 1000 + 500;
+    const match = /in\s+([\d.]+)s/.exec(body?.error?.message ?? '');
+    if (match) return Math.ceil(Number(match[1]) * 1000) + 500;
+    return 2500;
   }
 
   /**
@@ -94,7 +140,7 @@ export class LlmService {
     prompt: string,
     maxTokens = 4000,
   ): Promise<{ data: T; inputTokens: number; outputTokens: number }> {
-    const result = await this.generate(system, prompt, maxTokens);
+    const result = await this.generate(system, prompt, maxTokens, true);
     return {
       data: this.parseJson<T>(result.text),
       inputTokens: result.inputTokens,

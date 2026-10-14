@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { AppState, emptyState } from "./types";
 
 const STORAGE_KEY = "siwes-app-state-v1";
@@ -27,7 +27,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setHydrated(true);
   }, []);
 
-  const setState = (updater: (prev: AppState) => AppState) => {
+  // `setState` and the context value must keep a stable identity, otherwise
+  // every consumer's `load` callback (which depends on setState) is recreated
+  // on each render and its effect re-runs forever.
+  const setState = useCallback((updater: (prev: AppState) => AppState) => {
     setStateRaw((prev) => {
       const next = updater(prev);
       try {
@@ -37,13 +40,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-  };
+  }, []);
 
-  return (
-    <StoreContext.Provider value={{ state, setState, hydrated }}>
-      {children}
-    </StoreContext.Provider>
+  const value = useMemo(
+    () => ({ state, setState, hydrated }),
+    [state, setState, hydrated]
   );
+
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
 export function useAppStore() {

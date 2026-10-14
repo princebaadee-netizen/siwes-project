@@ -17,6 +17,7 @@ describe('LogbookService AI single-day polish', () => {
 
   beforeEach(() => {
     prisma = {
+      user: { findUnique: jest.fn().mockResolvedValue(null) },
       iTPlacement: {
         findUnique: jest.fn().mockResolvedValue(placement),
         update: jest.fn().mockResolvedValue({}),
@@ -26,10 +27,12 @@ describe('LogbookService AI single-day polish', () => {
         findMany: jest.fn().mockResolvedValue([{ id: 'd1' }]),
         count: jest.fn().mockResolvedValue(5),
         update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       purchase: { findFirst: jest.fn().mockResolvedValue(null) },
       logbookEntry: {
         create: jest.fn().mockResolvedValue({ id: 'e1' }),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
         findFirst: jest.fn().mockResolvedValue({ id: 'e1', calendarDayId: 'd1', status: 'DRAFT' }),
         update: jest.fn().mockResolvedValue({ id: 'e1', status: 'REVIEWED' }),
       },
@@ -217,7 +220,10 @@ describe('LogbookService AI single-day polish', () => {
       const result = await service.bulkFillup('u1', { description: 'I did IT support' });
 
       expect(result).toEqual({ created: 1, lockedRemaining: 1, trial: true });
-      expect(prisma.logbookEntry.create).toHaveBeenCalledTimes(1);
+      expect(prisma.logbookEntry.createMany).toHaveBeenCalledTimes(1);
+      expect(prisma.logbookEntry.createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ calendarDayId: 'd1', source: 'AI_BULK' })],
+      });
       expect(prisma.iTPlacement.update).toHaveBeenCalledWith({
         where: { id: 'p1' },
         data: { trialWeekUsed: true },

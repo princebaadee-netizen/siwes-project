@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppStore } from "@/lib/store";
 import { Card, Button, FieldLabel, TextInput } from "@/components/ui";
-import { PenLine, Sparkles, Loader2, Trash2, CalendarCheck, Check, Printer, Pencil } from "lucide-react";
+import { PenLine, Sparkles, Loader2, Trash2, CalendarCheck, Check, Printer, Pencil, FileText } from "lucide-react";
 import { api, clearToken, getToken, formatNaira } from "@/lib/api";
 
 interface CalendarDay {
@@ -67,6 +67,7 @@ export default function LogbookPage() {
   const [polishing, setPolishing] = useState(false);
   const [aiDraft, setAiDraft] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+  const [showBulkEntries, setShowBulkEntries] = useState(false);
   const [trial, setTrial] = useState<{
     total: number;
     used: number;
@@ -99,23 +100,26 @@ export default function LogbookPage() {
     }
     setLoading(true);
     try {
-      const [entryList, calendar, livePrices, placement, purchases] = await Promise.all([
+      const [entryList, calendar, livePrices, placement, purchases, me] = await Promise.all([
         api.listLogbookEntries(),
         api.getCalendar(),
         api.getPrices().catch(() => null),
         api.getMyPlacement().catch(() => null),
         api.listPurchases().catch(() => [] as any[]),
+        api.getMe().catch(() => null),
       ]);
       setEntries(entryList);
       if (livePrices) setPrices(livePrices);
       if (placement?.trial) setTrial(placement.trial);
-      // A successful bundle grants the IT/SIWES Pass too.
+      // A successful bundle grants the IT/SIWES Pass too. Admins skip the
+      // paywall server-side, so treat them as owning it for the UI.
       setHasItPass(
-        (purchases as any[]).some(
-          (p) =>
-            p.status === "SUCCESSFUL" &&
-            (p.productType === "IT_SIWES_PASS" || p.productType === "BUNDLE")
-        )
+        !!me?.isAdmin ||
+          (purchases as any[]).some(
+            (p) =>
+              p.status === "SUCCESSFUL" &&
+              (p.productType === "IT_SIWES_PASS" || p.productType === "BUNDLE")
+          )
       );
       // The backend is the only place that knows which days are real
       // attendance days, so the picker is built from its calendar rather than
@@ -304,6 +308,9 @@ export default function LogbookPage() {
       // them up (and to shrink the open-day list).
       await load();
       setBulkText("");
+      // Reveal the drafted entries straight away, right under the form, along
+      // with the offer to turn them into a report.
+      setShowBulkEntries(true);
       if (result.message) {
         setBulkMessage(result.message);
       } else {
@@ -445,6 +452,42 @@ export default function LogbookPage() {
         <p className="mb-4 rounded-md bg-rust/10 px-4 py-3 text-sm text-rust print:hidden">{error}</p>
       )}
 
+      {bulkMessage && (
+        <p className="mb-4 rounded-md bg-forest/10 px-4 py-3 text-sm text-forest print:hidden">
+          {bulkMessage}
+        </p>
+      )}
+
+      {mode === "bulk" && (
+        <Card className="print:hidden">
+          <FieldLabel>Tell us about your IT experience</FieldLabel>
+          <p className="mb-3 text-sm text-ink/50">
+            e.g. &quot;I did IT at Zenith Bank from 18 June to 18 September. I learnt HTML, CSS and JavaScript,
+            and helped maintain the internal staff portal.&quot;
+          </p>
+          <textarea
+            value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            className="focus-ring w-full rounded-md border border-line bg-white p-3.5 text-ink placeholder:text-ink/35"
+            rows={5}
+            placeholder="Describe your whole IT experience in your own words..."
+          />
+          <div className="mt-4 flex items-center justify-between gap-4">
+            <p className="font-mono text-xs text-ink/40">
+              {hasItPass
+                ? "IT/SIWES Pass active — draft as many days as you like."
+                : trial?.spent
+                  ? `Free AI week used up · the IT/SIWES Pass (${formatNaira(prices.IT_SIWES_PASS)}) unlocks the rest.`
+                  : `Free trial: ${trial?.remaining ?? 7} of ${trial?.total ?? 7} AI days left · rest needs the IT/SIWES Pass (${formatNaira(prices.IT_SIWES_PASS)}).`}
+            </p>
+            <Button onClick={runBulkFillup} disabled={generating || !bulkText.trim()}>
+              {generating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              {generating ? "Drafting..." : "Generate logbook"}
+            </Button>
+          </div>
+        </Card>
+      )}
+
       {mode === "manual" && (
         <>
           <Card className="print:hidden">
@@ -536,7 +579,11 @@ export default function LogbookPage() {
               </Button>
             </div>
           </Card>
+        </>
+      )}
 
+      {(mode === "manual" || showBulkEntries) && (
+        <>
           <h2 className="mb-3 mt-8 font-slab text-lg font-semibold text-ink">
             Entries ({entries.length})
           </h2>
@@ -652,36 +699,16 @@ export default function LogbookPage() {
         </>
       )}
 
-      {mode === "bulk" && (
-        <Card className="print:hidden">
-          <FieldLabel>Tell us about your IT experience</FieldLabel>
-          <p className="mb-3 text-sm text-ink/50">
-            e.g. &quot;I did IT at Zenith Bank from 18 June to 18 September. I learnt HTML, CSS and JavaScript,
-            and helped maintain the internal staff portal.&quot;
+      {mode === "bulk" && showBulkEntries && entries.length > 0 && (
+        <Card className="mt-6 print:hidden">
+          <h2 className="font-medium text-ink">Ready to write your report?</h2>
+          <p className="mt-1 mb-4 text-sm text-ink/60">
+            Your logbook has {entries.length} {entries.length === 1 ? "entry" : "entries"}.
+            Generate your IT/SIWES report from them.
           </p>
-          <textarea
-            value={bulkText}
-            onChange={(e) => setBulkText(e.target.value)}
-            className="focus-ring w-full rounded-md border border-line bg-white p-3.5 text-ink placeholder:text-ink/35"
-            rows={5}
-            placeholder="Describe your whole IT experience in your own words..."
-          />
-          {bulkMessage && (
-            <p className="mt-4 rounded-md bg-forest/10 px-4 py-3 text-sm text-forest">
-              {bulkMessage}
-            </p>
-          )}
-          <div className="mt-4 flex items-center justify-between gap-4">
-            <p className="font-mono text-xs text-ink/40">
-              {hasItPass
-                ? "IT/SIWES Pass active — draft as many days as you like."
-                : trial?.spent
-                  ? `Free AI week used up · the IT/SIWES Pass (${formatNaira(prices.IT_SIWES_PASS)}) unlocks the rest.`
-                  : `Free trial: ${trial?.remaining ?? 7} of ${trial?.total ?? 7} AI days left · rest needs the IT/SIWES Pass (${formatNaira(prices.IT_SIWES_PASS)}).`}
-            </p>
-            <Button onClick={runBulkFillup} disabled={generating || !bulkText.trim()}>
-              {generating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-              {generating ? "Drafting..." : "Generate logbook"}
+          <div className="flex justify-end">
+            <Button onClick={() => router.push("/dashboard/report")}>
+              <FileText size={15} /> Do IT report
             </Button>
           </div>
         </Card>

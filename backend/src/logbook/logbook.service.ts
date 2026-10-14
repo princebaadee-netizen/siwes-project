@@ -11,6 +11,7 @@ import { PrismaService } from '../common/prisma.service';
 import { LlmService } from '../ai/llm.service';
 import { estimateCostKobo } from '../ai/token-cost';
 import { AI_TRIAL_DAYS } from '../ai/trial';
+import { isAdminEmailFromEnv } from '../auth/admin';
 import { CreateLogbookEntryDto } from './dto/create-logbook-entry.dto';
 import { UpdateLogbookEntryDto } from './dto/update-logbook-entry.dto';
 import { BulkFillupDto } from './dto/bulk-fillup.dto';
@@ -32,8 +33,23 @@ export class LogbookService {
     private llm: LlmService,
   ) {}
 
+  /**
+   * Admin accounts (the ADMIN_EMAILS allowlist) always count as unlocked so the
+   * paywalled flows can be exercised end-to-end without a purchase. This is
+   * separate from AI_DEV_UNLOCK, which unlocks every account and is dev-only.
+   */
+  private async isAdminUser(userId: string): Promise<boolean> {
+    if (!process.env.ADMIN_EMAILS?.trim()) return false;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    return isAdminEmailFromEnv(user?.email);
+  }
+
   private async hasPass(userId: string, productType: PurchaseProductType): Promise<boolean> {
     if (process.env.AI_DEV_UNLOCK === 'true') return true;
+    if (await this.isAdminUser(userId)) return true;
     // The bundle grants both passes, so a successful BUNDLE also counts.
     const purchase = await this.prisma.purchase.findFirst({
       where: {
@@ -206,7 +222,7 @@ export class LogbookService {
   async polish(userId: string, dto: PolishLogbookDto) {
     if (!this.llm.configured) {
       throw new ServiceUnavailableException(
-        'AI logbook generation is not configured. Set ANTHROPIC_API_KEY on the backend.',
+        'AI logbook generation is not configured. Set GROQ_API_KEY on the backend.',
       );
     }
 
@@ -264,7 +280,7 @@ export class LogbookService {
   async bulkFillup(userId: string, dto: BulkFillupDto) {
     if (!this.llm.configured) {
       throw new ServiceUnavailableException(
-        'AI logbook generation is not configured. Set ANTHROPIC_API_KEY on the backend.',
+        'AI logbook generation is not configured. Set GROQ_API_KEY on the backend.',
       );
     }
 
@@ -311,7 +327,7 @@ export class LogbookService {
       startDate?: string | null;
       endDate?: string | null;
       skills?: string[];
-    }>(EXTRACTION_SYSTEM, extractionPrompt(dto.description), 1000);
+    }>(EXTRACTION_SYSTEM, extractionPrompt(dto.description), 1500);
 
     // Extraction is its own model call, so it gets its own log line: the bulk
     // cost stays itemised, and the spend is recorded even if generation fails.
@@ -335,51 +351,71 @@ export class LogbookService {
       },
     });
 
-    const generation = await this.llm.generateJson<{
-      entries?: { date: string; activity: string }[];
-    }>(
-      GENERATION_SYSTEM,
-      generationPrompt(
-        {
-          companyName: placement.companyName,
-          industrySector: placement.industrySector,
-          skills: extraction.data.skills ?? [],
-        },
-        target.map((d) => d.date.toISOString().slice(0, 10)),
-      ),
-      4000,
-    );
-
+    // Draft in small batches so each model response stays comfortably under the
+    // token limit — a single huge reply for 100+ days gets truncated and comes
+    // back as unreadable JSON.
     const dayByDate = new Map(target.map((d) => [d.date.toISOString().slice(0, 10), d]));
-    const validEntries = (generation.data.entries ?? []).filter(
-      (e) => e?.date && e?.activity?.trim() && dayByDate.has(e.date),
-    );
+    const BATCH_SIZE = 25;
+    const batches: string[][] = [];
+    for (let i = 0; i < target.length; i += BATCH_SIZE) {
+      batches.push(
+        target.slice(i, i + BATCH_SIZE).map((d) => d.date.toISOString().slice(0, 10)),
+      );
+    }
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      let count = 0;
-      for (const e of validEntries) {
-        const day = dayByDate.get(e.date);
-        if (!day) continue;
-        await tx.logbookEntry.create({
-          data: { calendarDayId: day.id, activity: e.activity.trim(), source: 'AI_BULK' },
-        });
-        await tx.attendanceCalendarDay.update({
-          where: { id: day.id },
+    const validEntries: { date: string; activity: string }[] = [];
+    for (const dates of batches) {
+      const generation = await this.llm.generateJson<{
+        entries?: { date: string; activity: string }[];
+      }>(
+        GENERATION_SYSTEM,
+        generationPrompt(
+          {
+            companyName: placement.companyName,
+            industrySector: placement.industrySector,
+            skills: extraction.data.skills ?? [],
+          },
+          dates,
+        ),
+        4000,
+      );
+
+      // Each batch is its own model call, so it gets its own log line.
+      await this.prisma.generationLog.create({
+        data: {
+          userId,
+          type: 'BULK_LOGBOOK',
+          estimatedTokens: generation.inputTokens + generation.outputTokens,
+          estimatedCostKobo: estimateCostKobo(generation.inputTokens, generation.outputTokens),
+        },
+      });
+
+      for (const e of generation.data.entries ?? []) {
+        if (e?.date && e?.activity?.trim() && dayByDate.has(e.date)) validEntries.push(e);
+      }
+    }
+
+    const created = await this.prisma.$transaction(
+      async (tx) => {
+        const newEntries = validEntries.map((e) => ({
+          calendarDayId: dayByDate.get(e.date)!.id,
+          activity: e.activity.trim(),
+          source: 'AI_BULK' as const,
+        }));
+        if (newEntries.length === 0) return 0;
+
+        // Two bulk statements instead of two per day: a long fill-up would
+        // otherwise blow past Prisma's interactive-transaction timeout (the
+        // default 5s against a hosted database) and fail mid-way.
+        const result = await tx.logbookEntry.createMany({ data: newEntries });
+        await tx.attendanceCalendarDay.updateMany({
+          where: { id: { in: newEntries.map((entry) => entry.calendarDayId) } },
           data: { hasLogbookEntry: true },
         });
-        count++;
-      }
-      return count;
-    });
-
-    await this.prisma.generationLog.create({
-      data: {
-        userId,
-        type: 'BULK_LOGBOOK',
-        estimatedTokens: generation.inputTokens + generation.outputTokens,
-        estimatedCostKobo: estimateCostKobo(generation.inputTokens, generation.outputTokens),
+        return result.count;
       },
-    });
+      { timeout: 30_000 },
+    );
 
     if (!hasItPass) {
       await this.consumeTrialIfDone(placement);

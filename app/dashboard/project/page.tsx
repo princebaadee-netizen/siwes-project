@@ -122,10 +122,11 @@ export default function ProjectPage() {
       setProject(first);
       setHasProjectPass(
         !!me &&
-          Array.isArray(me.purchases) &&
-          me.purchases.some(
-            (p: any) => p.productType === "PROJECT_PASS" && p.status === "SUCCESSFUL"
-          )
+          (me.isAdmin ||
+            (Array.isArray(me.purchases) &&
+              me.purchases.some(
+                (p: any) => p.productType === "PROJECT_PASS" && p.status === "SUCCESSFUL"
+              )))
       );
       if (first) {
         const refs = await api.listReferences(first.id).catch(() => []);

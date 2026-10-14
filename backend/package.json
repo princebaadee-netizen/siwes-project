@@ -11,6 +11,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
     "reset:password": "ts-node scripts/reset-password.ts",
+    "reset:data": "ts-node scripts/reset-user-data.ts",
     "test": "jest",
     "test:watch": "jest --watch"
   },

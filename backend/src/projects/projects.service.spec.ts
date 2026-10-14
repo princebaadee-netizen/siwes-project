@@ -32,6 +32,7 @@ describe('ProjectsService chapter regeneration', () => {
 
   beforeEach(() => {
     prisma = {
+      user: { findUnique: jest.fn().mockResolvedValue(null) },
       project: { findFirst: jest.fn().mockResolvedValue(projectWith(0)) },
       projectChapter: {
         update: jest
@@ -125,6 +126,9 @@ describe('ProjectsService topic suggestions', () => {
   });
 
   it('defaults the field to the student department and logs the generation', async () => {
+    process.env.AI_INPUT_PRICE_KOBO_PER_MTOK = '1000000';
+    process.env.AI_OUTPUT_PRICE_KOBO_PER_MTOK = '1000000';
+
     llm.generateJson.mockResolvedValue({
       data: {
         topics: [
@@ -136,18 +140,23 @@ describe('ProjectsService topic suggestions', () => {
       outputTokens: 40,
     });
 
-    const result = await service.suggestTopics('u1', {});
+    try {
+      const result = await service.suggestTopics('u1', {});
 
-    expect(result.field).toBe('Computer Science');
-    expect(result.topics).toEqual([
-      { title: 'Smart Attendance System', description: 'A web app.' },
-    ]);
-    expect(prisma.generationLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ type: 'TOPIC_SUGGESTION', estimatedTokens: 140 }),
-    });
-    expect(prisma.generationLog.create.mock.calls[0][0].data.estimatedCostKobo).toBeGreaterThan(
-      0,
-    );
+      expect(result.field).toBe('Computer Science');
+      expect(result.topics).toEqual([
+        { title: 'Smart Attendance System', description: 'A web app.' },
+      ]);
+      expect(prisma.generationLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ type: 'TOPIC_SUGGESTION', estimatedTokens: 140 }),
+      });
+      expect(
+        prisma.generationLog.create.mock.calls[0][0].data.estimatedCostKobo,
+      ).toBeGreaterThan(0);
+    } finally {
+      delete process.env.AI_INPUT_PRICE_KOBO_PER_MTOK;
+      delete process.env.AI_OUTPUT_PRICE_KOBO_PER_MTOK;
+    }
   });
 
   it('uses an explicit field and caps the list at five topics', async () => {

@@ -10,6 +10,7 @@ import { PurchaseProductType, TopicSource } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { LlmService } from '../ai/llm.service';
 import { estimateCostKobo } from '../ai/token-cost';
+import { isAdminEmailFromEnv } from '../auth/admin';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { CreateReferenceDto } from './dto/create-reference.dto';
 import { SuggestTopicsDto } from './dto/suggest-topics.dto';
@@ -34,8 +35,22 @@ export class ProjectsService {
     private llm: LlmService,
   ) {}
 
+  /**
+   * Admin accounts (the ADMIN_EMAILS allowlist) always count as unlocked so the
+   * paid flows can be exercised end-to-end without a purchase.
+   */
+  private async isAdminUser(userId: string): Promise<boolean> {
+    if (!process.env.ADMIN_EMAILS?.trim()) return false;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    return isAdminEmailFromEnv(user?.email);
+  }
+
   private async hasPass(userId: string): Promise<boolean> {
     if (process.env.AI_DEV_UNLOCK === 'true') return true;
+    if (await this.isAdminUser(userId)) return true;
     // A successful bundle covers the project pass too.
     const purchase = await this.prisma.purchase.findFirst({
       where: {
@@ -75,7 +90,7 @@ export class ProjectsService {
   async suggestTopics(userId: string, dto: SuggestTopicsDto) {
     if (!this.llm.configured) {
       throw new ServiceUnavailableException(
-        'AI topic suggestions are not configured. Set ANTHROPIC_API_KEY on the backend.',
+        'AI topic suggestions are not configured. Set GROQ_API_KEY on the backend.',
       );
     }
 
@@ -173,7 +188,7 @@ export class ProjectsService {
     if (!chapter) throw new NotFoundException('Chapter not found');
 
     const max = this.maxRegenerations();
-    if (chapter.regenerationsUsed >= max) {
+    if (chapter.regenerationsUsed >= max && !(await this.isAdminUser(userId))) {
       throw new ForbiddenException(
         `This chapter has reached its limit of ${max} regenerations.`,
       );
@@ -198,7 +213,7 @@ export class ProjectsService {
   ) {
     if (!this.llm.configured) {
       throw new ServiceUnavailableException(
-        'AI chapter drafting is not configured. Set ANTHROPIC_API_KEY on the backend.',
+        'AI chapter drafting is not configured. Set GROQ_API_KEY on the backend.',
       );
     }
 

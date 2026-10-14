@@ -30,10 +30,10 @@ describe('token-cost', () => {
     process.env.AI_OUTPUT_PRICE_KOBO_PER_MTOK = '-5';
 
     expect(getTokenRates()).toEqual({
-      inputKoboPerMtok: 720_000,
-      outputKoboPerMtok: 3_600_000,
+      inputKoboPerMtok: 0,
+      outputKoboPerMtok: 0,
     });
-    expect(estimateCostKobo(1_000_000, 1_000_000)).toBe(4_320_000);
+    expect(estimateCostKobo(1_000_000, 1_000_000)).toBe(0);
   });
 
   it('never returns a negative cost', () => {

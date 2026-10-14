@@ -50,6 +50,7 @@ export default function AccountPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [purchases, setPurchases] = useState<any[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
   const [prices, setPrices] = useState({
@@ -128,6 +129,7 @@ export default function AccountPage() {
       setDepartment(me.department ?? "");
       setModuleChoice(me.moduleChoice ?? null);
       setPurchases(Array.isArray(me.purchases) ? me.purchases : []);
+      setIsAdmin(!!me.isAdmin);
 
       const p = me.itPlacement;
       if (p) {
@@ -405,6 +407,13 @@ export default function AccountPage() {
       owned.add("IT_SIWES_PASS");
       owned.add("PROJECT_PASS");
     }
+  }
+  // Admins skip the paywall server-side; show the passes as active so testing
+  // matches what the API allows.
+  if (isAdmin) {
+    owned.add("IT_SIWES_PASS");
+    owned.add("PROJECT_PASS");
+    owned.add("BUNDLE");
   }
 
   return (

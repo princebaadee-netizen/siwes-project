@@ -60,12 +60,12 @@ By default the counters live in the process's memory, which is fine for a single
 
 ## AI generation (optional)
 
-Bulk logbook fill-up, single-day polish and chapter drafting call the Anthropic Messages API through `src/ai/llm.service.ts`. Configure these in `.env`:
+Bulk logbook fill-up, single-day polish and chapter drafting call Groq's OpenAI-compatible Chat Completions API through `src/ai/llm.service.ts`. Groq's free tier needs no credit card and costs nothing to run — get a key at https://console.groq.com/keys. Configure these in `.env`:
 
-- `ANTHROPIC_API_KEY` — enables the AI endpoints. Without it they return **503** and the UI buttons stay disabled.
-- `AI_MODEL` — the Claude model id (default `claude-sonnet-4-5`). Change it if your account uses a different model; Anthropic returns a 400 for an unknown model.
+- `GROQ_API_KEY` — enables the AI endpoints. Without it they return **503** and the UI buttons stay disabled.
+- `AI_MODEL` — the Groq model id (default `openai/gpt-oss-120b`, served on the free tier). Change it to any id from the Groq model catalogue; Groq returns a 400 for an unknown model.
 - `AI_MAX_REGENERATIONS` — how many times a chapter may be regenerated (each pass is a fresh AI call). Defaults to 3.
-- `AI_INPUT_PRICE_KOBO_PER_MTOK` / `AI_OUTPUT_PRICE_KOBO_PER_MTOK` — kobo per million input/output tokens, used to estimate the cost recorded on each `GenerationLog` (see `src/ai/token-cost.ts`). Defaults approximate Claude Sonnet pricing; set them to match your model and naira rate.
+- `AI_INPUT_PRICE_KOBO_PER_MTOK` / `AI_OUTPUT_PRICE_KOBO_PER_MTOK` — kobo per million input/output tokens, used to estimate the cost recorded on each `GenerationLog` (see `src/ai/token-cost.ts`). They default to **0** because the free tier is free; set them to the model's rates if you move to a paid plan.
 - `AI_DEV_UNLOCK=true` — dev-only: treats every pass and the free trial as unlocked so paid paths can be tested without a payment flow. Never enable in production.
 
 The free trial (`AI_TRIAL_DAYS = 7` in `logbook.service.ts`) covers the first week of logbook entries — the first 7 confirmed attendance days — shared by bulk fill-up and single-day polish, and it is spent only once (`ITPlacement.trialWeekUsed`) so deleting entries can't re-farm it; the rest unlock with a successful `IT_SIWES_PASS` purchase. Chapter 1 drafts free; Chapters 2–5 unlock with a `PROJECT_PASS` purchase. `POST /logbook/polish` only returns the polished text — the student saves it, and that save records the entry's `source` (`AI_SINGLE_DAY`).
@@ -149,6 +149,7 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 - **Money stored in kobo** (`amountKobo` on `Purchase`) to avoid floating-point currency bugs.
 - **Topic bank** (`topics.service.ts`): a seeded, admin-maintained catalogue of project topics (`ProjectTopic`) that students can browse by field and pick from instead of inventing one. `create-project` records the `topicSource` so a topic's origin is never ambiguous. A student can also ask the AI for tailored suggestions (`projects.service.ts#suggestTopics`), recorded under the `TOPIC_SUGGESTION` generation type.
 - **Admin topic management** (`topics-admin.controller.ts`): the CRUD routes above sit behind `JwtAuthGuard` + `AdminGuard` (`src/auth/admin.guard.ts`). Admins are chosen by the comma-separated `ADMIN_EMAILS` env allowlist rather than a role column — an admin signs in like anyone else, and the client learns they're an admin from `isAdmin` on `GET /users/me` (purely showing the UI; the guard is the real enforcement). An unset allowlist switches the admin API off entirely.
+- **Admin paywall bypass**: admin accounts also skip the paid gates so the paid AI flows can be exercised without a purchase — `logbook.service.ts#hasPass` and `projects.service.ts#hasPass` treat an `ADMIN_EMAILS` user as owning both passes, and `regenerateChapter` ignores the per-chapter regeneration cap for them. This is independent of `AI_DEV_UNLOCK` (which unlocks *every* account and is dev-only); the bypass is per-admin, so real students still pay. The frontend mirrors it, folding `isAdmin` into the "owned passes" state on the Account, Logbook and Project pages.
 
 ## Report & PDF export
 

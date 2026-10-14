@@ -7,7 +7,7 @@ One repo: the Next.js frontend at the root, the NestJS backend in `backend/`. Ne
 ```bash
 npm install
 npm --prefix backend install
-cp backend/.env.example backend/.env   # fill in DATABASE_URL + JWT_SECRET (optional: ANTHROPIC_API_KEY, PAYSTACK_SECRET_KEY)
+cp backend/.env.example backend/.env   # fill in DATABASE_URL + JWT_SECRET (optional: GROQ_API_KEY, PAYSTACK_SECRET_KEY)
 npm --prefix backend run prisma:generate
 npm --prefix backend run prisma:migrate
 npm run dev                            # starts API (:4001) + web (:3000) together
@@ -38,7 +38,7 @@ Two pieces: the NestJS API and the Next.js frontend. Deploy the API first — yo
 - **Build**: `npm ci && npx prisma generate && npm run build`
 - **Start**: `npm run start:prod` (runs `node dist/main.js`)
 - **Release/once**: `npx prisma migrate deploy` to apply migrations (including `add_email_verification`)
-- **Env**: `DATABASE_URL`, `JWT_SECRET` (long random), `FRONTEND_URL` (the deployed frontend URL — it's baked into reset and verification links), and `PORT` if the host needs one. Optional: `ANTHROPIC_API_KEY`/`AI_MODEL`, `PAYSTACK_SECRET_KEY`, `RESEND_API_KEY`/`MAIL_FROM`, `ADMIN_EMAILS` (comma-separated allowlist that enables the admin topic-bank API), and `REDIS_URL` (set it when running more than one instance so rate limits are shared instead of per-process)
+- **Env**: `DATABASE_URL`, `JWT_SECRET` (long random), `FRONTEND_URL` (the deployed frontend URL — it's baked into reset and verification links), and `PORT` if the host needs one. Optional: `GROQ_API_KEY`/`AI_MODEL` (free key at https://console.groq.com/keys), `PAYSTACK_SECRET_KEY`, `RESEND_API_KEY`/`MAIL_FROM`, `ADMIN_EMAILS` (comma-separated allowlist that enables the admin topic-bank API and lets those accounts skip the paywall/free-trial limits for testing), and `REDIS_URL` (set it when running more than one instance so rate limits are shared instead of per-process)
 - Keep `AI_DEV_UNLOCK`, `PAYSTACK_DEV_MODE` and `PASSWORD_RESET_DEV_MODE` **off** in production
 
 ### Frontend (Vercel — or any Node host)

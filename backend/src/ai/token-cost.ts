@@ -1,13 +1,14 @@
-// Rough cost model for the Anthropic Messages API, expressed in kobo so a
-// generation log can carry an estimated spend next to its token count. The
-// rates are per million tokens and are configurable because both model pricing
-// and the naira exchange rate drift over time.
+// Rough cost model for the AI provider, expressed in kobo so a generation log
+// can carry an estimated spend next to its token count. The rates are per
+// million tokens and are configurable because both model pricing and the naira
+// exchange rate drift over time.
 //
-// The defaults approximate Claude Sonnet ($3 / Mtok in, $15 / Mtok out) at
-// roughly ₦2,400 to the dollar. They are estimates for reporting only — the
-// real bill always comes from Anthropic.
-const DEFAULT_INPUT_KOBO_PER_MTOK = 720_000; // ₦7,200 / Mtok
-const DEFAULT_OUTPUT_KOBO_PER_MTOK = 3_600_000; // ₦36,000 / Mtok
+// The defaults are zero because Groq's free tier costs nothing. If you move to
+// a paid Groq plan (or another provider), set these to the model's rates —
+// e.g. gpt-oss-120b is $0.15 / Mtok in and $0.60 / Mtok out — converted to
+// kobo at your naira rate. They are estimates for reporting only.
+const DEFAULT_INPUT_KOBO_PER_MTOK = 0;
+const DEFAULT_OUTPUT_KOBO_PER_MTOK = 0;
 
 function readRateKoboPerMtok(name: string, fallback: number): number {
   const raw = process.env[name];
