@@ -26,7 +26,12 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       # The generated client is needed to typecheck/compile; this needs no database.
+      # Prisma reads DATABASE_URL and DIRECT_URL when generating, so give it
+      # placeholders — sqlite would fail the postgres-specific schema.
       - run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost:5432/db
+          DIRECT_URL: postgresql://user:pass@localhost:5432/db
       - run: npm test
       - run: npm run build
 

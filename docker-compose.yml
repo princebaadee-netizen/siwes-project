@@ -29,6 +29,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/siwes_app?schema=public
+      # Migrations use this; for local Postgres it's the same as DATABASE_URL.
+      DIRECT_URL: postgresql://postgres:postgres@db:5432/siwes_app?schema=public
       JWT_SECRET: change-me-in-production
       FRONTEND_URL: http://localhost:3000
       PORT: 4001
