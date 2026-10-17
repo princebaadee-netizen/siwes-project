@@ -41,8 +41,6 @@ const NUMBER_WORDS = [
   'Ten',
   'Eleven',
   'Twelve',
-  'Eighteen',
-  'Twenty-four',
 ];
 
 @Injectable()
@@ -202,6 +200,19 @@ export class ReportService {
     });
   }
 
+  /** Decorates a single section row, for responses about one section. */
+  private viewSection(row: any) {
+    const meta = sectionMeta(row.kind);
+    return {
+      kind: meta.kind,
+      title: meta.title,
+      chapter: meta.chapter,
+      content: row.content ?? null,
+      status: row.status ?? 'DRAFT',
+      regenerationsUsed: row.regenerationsUsed ?? 0,
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Edits
   // ---------------------------------------------------------------------------
@@ -240,7 +251,7 @@ export class ReportService {
         ...(dto.status !== undefined ? { status: dto.status } : {}),
       },
     });
-    return this.viewSections([section])[0];
+    return this.viewSection(section);
   }
 
   // ---------------------------------------------------------------------------
@@ -312,7 +323,7 @@ export class ReportService {
       },
     });
 
-    return this.viewSections([saved])[0];
+    return this.viewSection(saved);
   }
 
   /** Generates every section that has no content yet, in document order. */
