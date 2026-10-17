@@ -38,6 +38,11 @@ enum ProjectStatus {
   COMPLETED
 }
 
+enum ReportStatus {
+  DRAFT
+  COMPLETED
+}
+
 enum ReferenceSourceType {
   JOURNAL_ARTICLE
   CONFERENCE_PAPER
@@ -73,6 +78,20 @@ enum GenerationType {
   CHAPTER_DRAFT
   SINGLE_DAY_POLISH
   TOPIC_SUGGESTION
+  REPORT_SECTION
+}
+
+// The prose sections of the IT/SIWES report that the AI writes from the
+// logbook. The cover and title pages are structured fields on SiwesReport
+// rather than free text, so they are not listed here.
+enum ReportSectionKind {
+  ABSTRACT
+  DEDICATION
+  ACKNOWLEDGMENT
+  INTRODUCTION
+  INDUSTRIAL_EXPERIENCE
+  SKILLS_ACQUIRED
+  DISCUSSION_CONCLUSION
 }
 
 // ---------- Core ----------
@@ -94,6 +113,7 @@ model User {
   purchases   Purchase[]
   generationLogs GenerationLog[]
   passwordResetTokens PasswordResetToken[]
+  siwesReport SiwesReport?
 
   @@map("users")
 }
@@ -203,6 +223,58 @@ model LogbookEntry {
   updatedAt        DateTime               @updatedAt
 
   @@map("logbook_entries")
+}
+
+// ---------- IT/SIWES report ----------
+
+// One report per student, summarising their whole IT/SIWES experience. The
+// cover/title pages are assembled from the structured fields here (plus the
+// uploaded logo/cover image); the prose sections live in SiwesReportSection.
+model SiwesReport {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // --- Cover / title page ---
+  institutionName    String?
+  institutionAddress String?
+  faculty            String?
+  department         String?
+  programme          String? // e.g. "B.Sc. Computer Science"
+  level              String? // e.g. "400 Level"
+  matricNumber       String?
+  schoolSupervisor   String? // SIWES coordinator / school supervisor
+  companySupervisor  String? // industry-based supervisor
+  durationLabel      String? // e.g. "Six Months" — auto-derived, editable
+  submissionDate     DateTime?
+  logoUrl            String? // institution logo (uploaded)
+  coverImageUrl      String? // a ready-made cover/front page (uploaded)
+
+  // Names the student wants woven into the Dedication / Acknowledgment.
+  dedicationNames    String[] @default([])
+
+  status      ReportStatus @default(DRAFT)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  sections SiwesReportSection[]
+
+  @@map("siwes_reports")
+}
+
+model SiwesReportSection {
+  id          String             @id @default(uuid())
+  reportId    String
+  report      SiwesReport        @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  kind        ReportSectionKind
+  content     String?
+  status      EntryStatus        @default(DRAFT)
+  regenerationsUsed Int          @default(0)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@unique([reportId, kind])
+  @@map("siwes_report_sections")
 }
 
 // ---------- Final Year Project ----------

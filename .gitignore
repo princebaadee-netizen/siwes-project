@@ -13,3 +13,6 @@ dev.out
 backend/node_modules
 backend/dist
 backend/.env
+
+# Student-uploaded report logos / cover images, served from backend disk
+backend/uploads

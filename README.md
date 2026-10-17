@@ -37,9 +37,10 @@ Two pieces: the NestJS API and the Next.js frontend. Deploy the API first — yo
 
 - **Build**: `npm ci && npx prisma generate && npm run build`
 - **Start**: `npm run start:prod` (runs `node dist/main.js`)
-- **Release/once**: `npx prisma migrate deploy` to apply migrations (including `add_email_verification`)
+- **Release/once**: `npx prisma migrate deploy` to apply migrations (email verification, the SIWES report tables, and the rest)
 - **Env**: `DATABASE_URL`, `JWT_SECRET` (long random), `FRONTEND_URL` (the deployed frontend URL — it's baked into reset and verification links), and `PORT` if the host needs one. Optional: `GROQ_API_KEY`/`AI_MODEL` (free key at https://console.groq.com/keys), `PAYSTACK_SECRET_KEY`, `RESEND_API_KEY`/`MAIL_FROM`, `ADMIN_EMAILS` (comma-separated allowlist that enables the admin topic-bank API and lets those accounts skip the paywall/free-trial limits for testing), and `REDIS_URL` (set it when running more than one instance so rate limits are shared instead of per-process)
 - Keep `AI_DEV_UNLOCK`, `PAYSTACK_DEV_MODE` and `PASSWORD_RESET_DEV_MODE` **off** in production
+- **PDF export uses Puppeteer**, which needs a Chromium binary plus its shared libraries. On a plain Node host (e.g. Render) set `PUPPETEER_SKIP_DOWNLOAD=true` and point `PUPPETEER_EXECUTABLE_PATH` at an installed Chrome/Chromium; the provided `backend/Dockerfile` already installs one. Uploaded logos/covers are written to `backend/uploads/` — mount a persistent volume there on hosts with ephemeral disks
 
 ### Frontend (Vercel — or any Node host)
 
@@ -54,7 +55,7 @@ For a self-contained API + database without installing Postgres:
 docker compose up --build
 ```
 
-This builds the API from `backend/Dockerfile`, starts Postgres, and runs `prisma migrate deploy` on boot — so the schema and the email-verification migration apply automatically. The API listens on http://localhost:4001; run the frontend with `npm run dev` (it proxies there by default). Replace the placeholder `JWT_SECRET` and drop the dev-only flags in `docker-compose.yml` before exposing it anywhere.
+This builds the API from `backend/Dockerfile`, starts Postgres, and runs `prisma migrate deploy` on boot — so the schema and all migrations apply automatically. The image installs Chromium for Puppeteer-based PDF export and keeps uploaded report images on a named volume. The API listens on http://localhost:4001; run the frontend with `npm run dev` (it proxies there by default). Replace the placeholder `JWT_SECRET` and drop the dev-only flags in `docker-compose.yml` before exposing it anywhere.
 
 ### Wiring the external callbacks
 
@@ -69,7 +70,7 @@ This builds the API from `backend/Dockerfile`, starts Postgres, and runs `prisma
   - **Overview**: fetches real chapter-completion and logbook progress from the backend.
   - **IT/SIWES**: day-by-day logbook CRUD (edit or delete any entry) with per-entry review status (Draft → Reviewed → Finalized), the "did you work these public holidays?" confirmation question, AI bulk fill-up (draft entries from a plain-text description; first 7 days free), **AI single-day polish** (turn a rough note into a proper entry before saving), a live **free-trial indicator** (days left, or a nudge to buy the pass once it's spent), and **Print / Save as PDF** for a clean logbook with a cover page. Editing your placement rebuilds the calendar in place, keeping entries on days that are still on your attendance pattern.
   - **Project**: the real project/chapters, mark complete / reopen for revisions, per-chapter AI drafting (Chapter 1 free, the rest need the Project Pass) with a bounded number of **regenerations** per chapter, a **references list with citation verification** (Crossref/DataCite/Open Library, else link-check), and **Print / Save as PDF** for the chapters. When creating a project you can type your own topic, pick one from the **topic bank** — a filterable catalogue of curated topics (by field) — or let **AI suggest topics** tailored to your field/interests. Where the topic came from is recorded either way. Admins can curate the bank (add/edit/remove) from a **Topic bank** page, gated by the API's `ADMIN_EMAILS` allowlist.
-  - **Report**: a ready-to-print SIWES report assembled automatically from your placement, logbook and project, with a cover page (**Print / Save as PDF**). Sections are numbered from what's present, and each logbook entry is shown with its review status so drafts aren't mistaken for final work.
+  - **Report**: the AI-written IT/SIWES report (the IT/SIWES Pass gates generation). It assembles a **cover & title page** from editable details (institution, faculty/department, programme, level, matric no., supervisors, duration, submission date, and an optional uploaded logo or ready-made cover image), then writes the prose sections — Abstract, Dedication, Acknowledgment and Chapters 1–4 (Introduction, Industrial Experience, Skills Acquired, Discussion and Conclusion) — from your placement, logbook and project, one section per request to stay within the AI rate limit. Each section can be edited by hand and marked **Draft → Reviewed → Finalized**, rewritten with AI (bounded regenerations, with optional guidance), or all blank sections written at once. Export a print-ready **PDF** or an editable **Word (.docx)**. Reading/editing is free; only AI writing needs the pass.
   - **Account**: saves profile, module choice and IT placement for real, sells the two passes (or a bundle that unlocks both) through Paystack (instant dev-mode grant when no keys are set), and shows an **AI usage** summary (generations, tokens and estimated cost, broken down by generation type).
 
 ## Design system
@@ -93,7 +94,7 @@ app/
     page.tsx               — overview, fetches real project progress
     logbook/page.tsx       — logbook CRUD + calendar, wired to /logbook endpoints
     project/page.tsx
-    report/page.tsx        — printable SIWES report assembled from real data
+    report/page.tsx        — AI-written SIWES report: cover details, per-section generation/editing, PDF & DOCX export
     account/page.tsx
 components/
   ui.tsx

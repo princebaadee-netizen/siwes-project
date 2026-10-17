@@ -83,7 +83,8 @@ export type GenerationType =
   | "BULK_LOGBOOK"
   | "CHAPTER_DRAFT"
   | "SINGLE_DAY_POLISH"
-  | "TOPIC_SUGGESTION";
+  | "TOPIC_SUGGESTION"
+  | "REPORT_SECTION";
 
 export interface UsageEntry {
   id: string;
@@ -98,6 +99,149 @@ export interface UsageSummary {
   byType: { type: GenerationType; generations: number; tokens: number; costKobo: number }[];
   recent: UsageEntry[];
   pricing: { inputKoboPerMtok: number; outputKoboPerMtok: number };
+}
+
+export type ReportSectionKind =
+  | "ABSTRACT"
+  | "DEDICATION"
+  | "ACKNOWLEDGMENT"
+  | "INTRODUCTION"
+  | "INDUSTRIAL_EXPERIENCE"
+  | "SKILLS_ACQUIRED"
+  | "DISCUSSION_CONCLUSION";
+
+export type ReportSectionStatus = "DRAFT" | "REVIEWED" | "FINALIZED";
+
+export interface ReportSectionView {
+  kind: ReportSectionKind;
+  title: string;
+  chapter: number | null;
+  content: string | null;
+  status: ReportSectionStatus;
+  regenerationsUsed: number;
+}
+
+export interface SiwesReport {
+  id: string;
+  userId: string;
+  institutionName: string | null;
+  institutionAddress: string | null;
+  faculty: string | null;
+  department: string | null;
+  programme: string | null;
+  level: string | null;
+  matricNumber: string | null;
+  schoolSupervisor: string | null;
+  companySupervisor: string | null;
+  durationLabel: string | null;
+  submissionDate: string | null;
+  logoUrl: string | null;
+  coverImageUrl: string | null;
+  dedicationNames: string[];
+  status: "DRAFT" | "COMPLETED";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReportDefaults {
+  fullName: string;
+  school: string;
+  department: string;
+  companyName: string;
+  companyAddress: string;
+  industrySector: string;
+  startDate: string | null;
+  endDate: string | null;
+  durationLabel: string | null;
+  projectTitle: string | null;
+}
+
+export interface ReportPayload {
+  report: SiwesReport;
+  sections: ReportSectionView[];
+  canGenerate: boolean;
+  logbookCount: number;
+  defaults: ReportDefaults;
+}
+
+export type ReportUpdate = Partial<
+  Pick<
+    SiwesReport,
+    | "institutionName"
+    | "institutionAddress"
+    | "faculty"
+    | "department"
+    | "programme"
+    | "level"
+    | "matricNumber"
+    | "schoolSupervisor"
+    | "companySupervisor"
+    | "durationLabel"
+    | "submissionDate"
+    | "dedicationNames"
+  >
+>;
+
+export interface ReportGenerationResult extends ReportPayload {
+  generated: ReportSectionKind[];
+  failed: ReportSectionKind[];
+}
+
+/**
+ * POSTs a multipart body. Unlike `request`, it must NOT set
+ * Content-Type — the browser adds the multipart boundary itself.
+ */
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  const token = getToken();
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+  } catch {
+    throw new ApiError("Can't reach the server. Check your connection and try again.", 0);
+  }
+
+  const isJson = res.headers.get("content-type")?.includes("application/json");
+  const body = isJson ? await res.json().catch(() => null) : null;
+
+  if (!res.ok) {
+    const message = body?.message ?? "Upload failed. Please try again.";
+    throw new ApiError(Array.isArray(message) ? message.join(", ") : message, res.status);
+  }
+  return body as T;
+}
+
+/** Fetches a binary export with the auth header, then saves it via a blob. */
+async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const token = getToken();
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch {
+    throw new ApiError("Can't reach the server. Check your connection and try again.", 0);
+  }
+  if (!res.ok) {
+    throw new ApiError("Could not download your report. Please try again.", res.status);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const match = /filename="?([^";]+)"?/.exec(disposition);
+  const filename = match?.[1] ?? fallbackName;
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export const api = {
@@ -288,6 +432,51 @@ export const api = {
 
   getUsage: (limit?: number) =>
     request<UsageSummary>(`/usage${limit ? `?limit=${limit}` : ""}`),
+
+  getReport: () => request<ReportPayload>("/report"),
+
+  updateReport: (data: ReportUpdate) =>
+    request<{ report: SiwesReport; sections: ReportSectionView[] }>("/report", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  updateReportSection: (
+    kind: ReportSectionKind,
+    data: { content?: string; status?: ReportSectionStatus }
+  ) =>
+    request<ReportSectionView>(`/report/sections/${kind}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  generateReportSection: (kind: ReportSectionKind, notes?: string) =>
+    request<ReportSectionView>(`/report/sections/${kind}/generate`, {
+      method: "POST",
+      body: JSON.stringify({ notes }),
+    }),
+
+  regenerateReportSection: (kind: ReportSectionKind, notes?: string) =>
+    request<ReportSectionView>(`/report/sections/${kind}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ notes }),
+    }),
+
+  generateAllReport: () =>
+    request<ReportGenerationResult>("/report/generate-all", { method: "POST" }),
+
+  uploadReportImage: (field: "logo" | "cover", file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return requestForm<{ report: SiwesReport; sections: ReportSectionView[] }>(
+      `/report/${field === "logo" ? "logo" : "cover-image"}`,
+      form
+    );
+  },
+
+  downloadReportPdf: () => downloadFile("/report/export.pdf", "siwes-report.pdf"),
+
+  downloadReportDocx: () => downloadFile("/report/export.docx", "siwes-report.docx"),
 };
 
 /** Prices come from the backend in naira; render them as ₦10,000. */

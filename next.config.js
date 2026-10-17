@@ -27,6 +27,12 @@ const nextConfig = {
         source: "/api/:path*",
         destination: `${apiTarget()}/:path*`,
       },
+      {
+        // Uploaded report logos and cover images live on the API's disk and are
+        // referenced as /uploads/... so the browser can load them same-origin.
+        source: "/uploads/:path*",
+        destination: `${apiTarget()}/uploads/:path*`,
+      },
     ];
   },
 };

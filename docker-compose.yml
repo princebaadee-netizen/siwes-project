@@ -37,6 +37,10 @@ services:
       PAYSTACK_DEV_MODE: "true"
     ports:
       - "4001:4001"
+    volumes:
+      # Report logos / cover images are written to disk under uploads/.
+      - uploads:/app/uploads
 
 volumes:
   pgdata:
+  uploads:

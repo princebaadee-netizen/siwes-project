@@ -12,6 +12,7 @@ import { ProjectsModule } from './projects/projects.module';
 import { TopicsModule } from './topics/topics.module';
 import { UsageModule } from './usage/usage.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ReportModule } from './report/report.module';
 import { PrismaModule } from './common/prisma.module';
 import { RedisThrottlerModule } from './common/redis-throttler.module';
 
@@ -39,6 +40,7 @@ import { RedisThrottlerModule } from './common/redis-throttler.module';
     TopicsModule,
     UsageModule,
     PaymentsModule,
+    ReportModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -28,6 +28,7 @@ const GENERATION_LABELS: Record<string, string> = {
   CHAPTER_DRAFT: "Chapter draft",
   SINGLE_DAY_POLISH: "Single-day polish",
   TOPIC_SUGGESTION: "Topic suggestions",
+  REPORT_SECTION: "Report section",
 };
 
 const MODULE_OPTIONS: { id: BackendModule; title: string; desc: string }[] = [
