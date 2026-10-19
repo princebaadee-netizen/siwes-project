@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BookText, GraduationCap, Layers, Loader2 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
@@ -19,6 +20,10 @@ export default function OnboardingPage() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Flips once this wizard's signup succeeds, so a retry after a later
+  // failure resumes the setup instead of re-running signup into a 409.
+  const [accountCreated, setAccountCreated] = useState(false);
+  const [emailConflict, setEmailConflict] = useState(false);
 
   const steps: StepId[] = useMemo(() => {
     const base: StepId[] = ["module", "profile", "account"];
@@ -50,10 +55,15 @@ export default function OnboardingPage() {
   async function finish() {
     setSubmitting(true);
     setError(null);
+    setEmailConflict(false);
     try {
-      // 1. Create the account
-      const auth = await api.signup(state.profile.fullName, email, password);
-      setToken(auth.accessToken);
+      // 1. Create the account — skipped when this wizard already signed up,
+      // so a retry after a later failure doesn't die on the unique-email 409.
+      if (!accountCreated) {
+        const auth = await api.signup(state.profile.fullName, email, password);
+        setToken(auth.accessToken);
+        setAccountCreated(true);
+      }
 
       // 2. Save profile details + which module(s) they chose
       if (state.moduleChoice) {
@@ -77,18 +87,24 @@ export default function OnboardingPage() {
         });
       }
 
-      // 4. Create the project (auto-generates the 5 chapters), if relevant
+      // 4. Create the project (auto-generates the 5 chapters), if relevant.
+      // Projects have no unique constraint per user, so a retry after a lost
+      // response would duplicate it — reuse one that already exists.
       if (state.moduleChoice === "project" || state.moduleChoice === "both") {
-        await api.createProject({
-          title: state.project.title,
-          supervisorName: state.project.supervisorName || undefined,
-        });
+        const existing = await api.getMyProjects().catch(() => []);
+        if (!Array.isArray(existing) || existing.length === 0) {
+          await api.createProject({
+            title: state.project.title,
+            supervisorName: state.project.supervisorName || undefined,
+          });
+        }
       }
 
       setState((prev) => ({ ...prev, onboardingComplete: true }));
       router.push("/dashboard");
     } catch (err: any) {
       setError(err?.message || "Something went wrong — please try again.");
+      if (err?.status === 409) setEmailConflict(true);
     } finally {
       setSubmitting(false);
     }
@@ -134,6 +150,18 @@ export default function OnboardingPage() {
       {step === "review" && ReviewStep()}
       {error && (
         <p className="mt-6 rounded-md bg-rust/10 px-4 py-3 text-sm text-rust">{error}</p>
+      )}
+      {emailConflict && (
+        <p className="mt-3 text-sm text-ink/60">
+          An account with this email already exists.{" "}
+          <Link
+            href="/login"
+            className="focus-ring font-medium text-forest underline decoration-forest/30 underline-offset-4"
+          >
+            Sign in
+          </Link>{" "}
+          to finish setting up — your progress on this page is saved.
+        </p>
       )}
 
       <div className="mt-10 flex items-center justify-between">
@@ -244,6 +272,16 @@ export default function OnboardingPage() {
               placeholder="At least 8 characters"
             />
           </div>
+          <p className="text-sm text-ink/60">
+            Already have an account?{" "}
+            <Link
+              href="/login"
+              className="focus-ring font-medium text-forest underline decoration-forest/30 underline-offset-4"
+            >
+              Sign in
+            </Link>{" "}
+            instead — you can finish setting up from your dashboard.
+          </p>
         </div>
       </div>
     );
