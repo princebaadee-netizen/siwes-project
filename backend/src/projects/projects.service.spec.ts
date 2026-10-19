@@ -1,6 +1,8 @@
 import {
   BadGatewayException,
+  BadRequestException,
   ForbiddenException,
+  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
@@ -180,5 +182,93 @@ describe('ProjectsService topic suggestions', () => {
 
     await expect(service.suggestTopics('u1', {})).rejects.toBeInstanceOf(BadGatewayException);
     expect(prisma.generationLog.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('ProjectsService chapter status', () => {
+  let prisma: any;
+  let service: ProjectsService;
+
+  function projectWith(statuses: string[], content = 'drafted content') {
+    return {
+      id: 'pr1',
+      title: 'An App',
+      status: 'IN_PROGRESS',
+      chapters: statuses.map((status, i) => ({
+        id: `c${i + 1}`,
+        chapterNumber: i + 1,
+        title: `Chapter ${i + 1}`,
+        status,
+        content,
+      })),
+    };
+  }
+
+  beforeEach(() => {
+    prisma = {
+      project: {
+        findFirst: jest.fn().mockResolvedValue(projectWith(['DRAFT', 'DRAFT'])),
+        update: jest.fn().mockResolvedValue({ id: 'pr1', status: 'COMPLETED' }),
+      },
+      projectChapter: {
+        update: jest.fn().mockResolvedValue({ id: 'c1', status: 'REVIEWED' }),
+      },
+    };
+    service = new ProjectsService(prisma, { configured: false } as any);
+  });
+
+  it('advances the status of an owned chapter without touching content', async () => {
+    const result = await service.updateChapterStatus('u1', 'pr1', 1, 'REVIEWED');
+
+    expect(result.status).toBe('REVIEWED');
+    expect(prisma.projectChapter.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { status: 'REVIEWED' },
+    });
+  });
+
+  it('rejects a status change on a chapter with no content', async () => {
+    prisma.project.findFirst.mockResolvedValue(projectWith(['DRAFT'], ''));
+
+    await expect(service.updateChapterStatus('u1', 'pr1', 1, 'FINALIZED')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.projectChapter.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a status change on someone else’s project', async () => {
+    prisma.project.findFirst.mockResolvedValue(null);
+
+    await expect(service.updateChapterStatus('u1', 'not-mine', 1, 'REVIEWED')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('rejects a status change once the project is complete', async () => {
+    const completed = projectWith(['FINALIZED', 'FINALIZED']);
+    completed.status = 'COMPLETED';
+    prisma.project.findFirst.mockResolvedValue(completed);
+
+    await expect(service.updateChapterStatus('u1', 'pr1', 1, 'DRAFT')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('refuses to complete the project while chapters are unfinished', async () => {
+    prisma.project.findFirst.mockResolvedValue(projectWith(['FINALIZED', 'REVIEWED']));
+
+    await expect(service.markComplete('u1', 'pr1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.project.update).not.toHaveBeenCalled();
+  });
+
+  it('completes the project once every chapter is finalized', async () => {
+    prisma.project.findFirst.mockResolvedValue(projectWith(['FINALIZED', 'FINALIZED']));
+
+    await service.markComplete('u1', 'pr1');
+
+    expect(prisma.project.update).toHaveBeenCalledWith({
+      where: { id: 'pr1' },
+      data: { status: 'COMPLETED', completedAt: expect.any(Date) },
+    });
   });
 });

@@ -397,6 +397,12 @@ export const api = {
       body: JSON.stringify({ rawInputText }),
     }),
 
+  updateChapterStatus: (projectId: string, chapterNumber: number, status: string) =>
+    request<any>(`/projects/${projectId}/chapters/${chapterNumber}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+
   listReferences: (projectId: string) => request<any[]>(`/projects/${projectId}/references`),
 
   addReference: (

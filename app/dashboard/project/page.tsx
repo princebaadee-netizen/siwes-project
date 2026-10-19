@@ -60,6 +60,8 @@ const CHAPTER_STATUS_LABEL: Record<ChapterStatus, string> = {
   FINALIZED: "Finalized",
 };
 
+const CHAPTER_STATUS_ORDER: ChapterStatus[] = ["DRAFT", "REVIEWED", "FINALIZED"];
+
 const SOURCE_TYPES: { value: string; label: string }[] = [
   { value: "JOURNAL_ARTICLE", label: "Journal article" },
   { value: "CONFERENCE_PAPER", label: "Conference paper" },
@@ -78,6 +80,7 @@ export default function ProjectPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<"complete" | "reopen" | null>(null);
   const [drafting, setDrafting] = useState<number | null>(null);
+  const [updatingChapter, setUpdatingChapter] = useState<number | null>(null);
   const [openChapter, setOpenChapter] = useState<number | null>(null);
   const [chapterNotes, setChapterNotes] = useState<Record<number, string>>({});
   const [references, setReferences] = useState<Reference[]>([]);
@@ -207,6 +210,45 @@ export default function ProjectPage() {
       }
     } finally {
       setDrafting(null);
+    }
+  }
+
+  async function setChapterStatus(chapterNumber: number, status: ChapterStatus) {
+    if (!project) return;
+    const previous = project.chapters.find((c) => c.chapterNumber === chapterNumber)?.status;
+    if (!previous || previous === status) return;
+
+    // Optimistic, with rollback — same pattern as the logbook status control.
+    setUpdatingChapter(chapterNumber);
+    setError(null);
+    setProject((prev) =>
+      prev
+        ? {
+            ...prev,
+            chapters: prev.chapters.map((c) =>
+              c.chapterNumber === chapterNumber ? { ...c, status } : c
+            ),
+          }
+        : prev
+    );
+    try {
+      await api.updateChapterStatus(project.id, chapterNumber, status);
+    } catch (err: any) {
+      setProject((prev) =>
+        prev
+          ? {
+              ...prev,
+              chapters: prev.chapters.map((c) =>
+                c.chapterNumber === chapterNumber ? { ...c, status: previous } : c
+              ),
+            }
+          : prev
+      );
+      if (!handleAuthFailure(err)) {
+        setError(err?.message || "Could not update that chapter's status.");
+      }
+    } finally {
+      setUpdatingChapter(null);
     }
   }
 
@@ -399,9 +441,32 @@ export default function ProjectPage() {
                       <Lock size={13} /> Needs Project Pass
                     </span>
                   )}
-                  <span className="font-mono text-xs text-ink/40">
-                    {CHAPTER_STATUS_LABEL[ch.status]}
-                  </span>
+                  {ch.content && !isComplete ? (
+                    <div className="inline-flex items-center rounded-md border border-line p-0.5 print:hidden">
+                      {CHAPTER_STATUS_ORDER.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          disabled={updatingChapter === ch.chapterNumber || ch.status === s}
+                          onClick={() => setChapterStatus(ch.chapterNumber, s)}
+                          className={`focus-ring rounded-sm px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-default ${
+                            ch.status === s
+                              ? "bg-forest text-paper"
+                              : "text-ink/50 hover:text-forest"
+                          }`}
+                        >
+                          {CHAPTER_STATUS_LABEL[s]}
+                        </button>
+                      ))}
+                      {updatingChapter === ch.chapterNumber && (
+                        <Loader2 size={13} className="mx-1.5 my-auto animate-spin text-ink/40" />
+                      )}
+                    </div>
+                  ) : (
+                    <span className="font-mono text-xs text-ink/40">
+                      {CHAPTER_STATUS_LABEL[ch.status]}
+                    </span>
+                  )}
                   {canDraft && (
                     <button
                       type="button"

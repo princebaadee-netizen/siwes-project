@@ -108,6 +108,7 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 | `PATCH /users/me` | Update fullName/school/department/moduleChoice |
 | `POST /it-placement` | Set up (or edit) the IT placement — generates the full holiday-aware attendance calendar in one call |
 | `GET /it-placement/me` | Fetch placement + generated calendar, plus a `trial` summary (`total`/`used`/`remaining`/`spent`) for the free AI week |
+| `GET /it-placement/calendar` | Just the generated attendance calendar for the placement |
 | `POST /it-placement/confirm-holidays` | The one gating question from the plan — pass the list of holiday dates the student actually worked; everything else gets marked not-attended |
 | `GET /logbook` | List the logbook entries for the placement |
 | `POST /logbook` | Create one entry — `{ date, activity, evidenceUrl? }` |
@@ -127,11 +128,12 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 | `GET /projects/:id` | One project + its chapters |
 | `POST /projects/:id/chapters/:chapterNumber/draft` | AI-draft one chapter from `{ rawInputText }` (Chapter 1 free, the rest need the Project Pass) |
 | `POST /projects/:id/chapters/:chapterNumber/regenerate` | Re-draft a chapter — `{ rawInputText? }` (falls back to the stored notes). Bounded by `AI_MAX_REGENERATIONS` |
+| `PATCH /projects/:id/chapters/:chapterNumber` | Move a drafted chapter through Draft → Reviewed → Finalized — `{ status }`. Drives the "chapters finalized" progress rings |
 | `GET /projects/:id/references` | List the project's references |
 | `POST /projects/:id/references` | Add a reference — `{ citationText, sourceType, doiOrIsbnOrLink? }` |
 | `POST /projects/:id/references/:referenceId/verify` | Verify one reference (Crossref → DataCite → Open Library, else link-check) |
 | `DELETE /projects/:id/references/:referenceId` | Remove a reference |
-| `POST /projects/:id/mark-complete` | Student explicitly marks the project done (read-only from here) |
+| `POST /projects/:id/mark-complete` | Student explicitly marks the project done (read-only from here). Rejected until every chapter is `FINALIZED` |
 | `GET /usage` | The caller's own AI usage — totals, a per-`GenerationType` breakdown and recent generations, all with estimated token counts and cost in kobo. `?limit=` caps the recent list (default 20, max 100) |
 | `POST /projects/:id/reopen` | Free reopen for revisions, per the plan |
 | `GET /payments/prices` | Current pass prices in naira (public) |
@@ -139,6 +141,16 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 | `GET /payments/verify/:reference` | Verify a purchase after Paystack redirects the student back |
 | `POST /payments/webhook` | Paystack server callback (HMAC-signed, public) |
 | `GET /payments` | List the student's purchases |
+| `GET /report` | The student's SIWES report (lazily created) |
+| `PATCH /report` | Update the cover fields (title, name, school, supervisor, session, etc.) |
+| `PATCH /report/sections/:kind` | Hand-edit a section — `{ content?, status? }` |
+| `POST /report/sections/:kind/generate` | AI-generate one section (needs a placement; first section of each kind free per the pass rules) |
+| `POST /report/sections/:kind/regenerate` | Re-generate a section, bounded like chapter regenerations |
+| `POST /report/generate-all` | AI-generate every remaining section in one call (the UI loops per section instead — one big call timed out at the proxy) |
+| `POST /report/logo` | Upload the student's signature/logo image (multipart, image-only, max 5 MB) → stored under `/uploads` |
+| `POST /report/cover-image` | Upload a custom cover image (same rules as the logo) |
+| `GET /report/export.pdf` | Server-rendered PDF of the whole report (Puppeteer/Chromium) |
+| `GET /report/export.docx` | Word export of the whole report (`docx` package) |
 
 ## What's implemented from the plan, specifically
 
@@ -153,7 +165,7 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 
 ## Report & PDF export
 
-There is no report or PDF endpoint here — deliberately. The frontend assembles a printable SIWES report (`/dashboard/report`) from the placement, logbook and project data this API already serves, and exports the logbook, project chapters and report with the browser's **Print / Save as PDF**.
+The `/report` endpoints above build the SIWES report server-side: AI-written sections, logo/cover uploads, and two export routes — `GET /report/export.pdf` (Puppeteer; needs a Chromium binary, see the root README's deploy notes) and `GET /report/export.docx`. The frontend at `/dashboard/report` drives them and still offers the browser's **Print / Save as PDF** as a zero-dependency fallback.
 
 ## Connecting the frontend
 

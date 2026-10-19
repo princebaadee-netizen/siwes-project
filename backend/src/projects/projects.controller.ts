@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AiThrottlerGuard } from '../common/ai-throttler.guard';
@@ -7,6 +7,7 @@ import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { DraftChapterDto } from './dto/draft-chapter.dto';
 import { RegenerateChapterDto } from './dto/regenerate-chapter.dto';
+import { UpdateChapterStatusDto } from './dto/update-chapter-status.dto';
 import { CreateReferenceDto } from './dto/create-reference.dto';
 import { SuggestTopicsDto } from './dto/suggest-topics.dto';
 import { PrismaService } from '../common/prisma.service';
@@ -70,6 +71,18 @@ export class ProjectsController {
     @Body() dto: RegenerateChapterDto,
   ) {
     return this.projectsService.regenerateChapter(userId, id, chapterNumber, dto.rawInputText);
+  }
+
+  // A plain status write (Draft → Reviewed → Finalized), no model call, so it
+  // carries no AI throttle.
+  @Patch(':id/chapters/:chapterNumber')
+  updateChapterStatus(
+    @CurrentUserId() userId: string,
+    @Param('id') id: string,
+    @Param('chapterNumber', ParseIntPipe) chapterNumber: number,
+    @Body() dto: UpdateChapterStatusDto,
+  ) {
+    return this.projectsService.updateChapterStatus(userId, id, chapterNumber, dto.status);
   }
 
   @Get(':id/references')

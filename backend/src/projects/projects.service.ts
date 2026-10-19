@@ -324,9 +324,47 @@ export class ProjectsService {
     });
   }
 
+  /**
+   * Moves a chapter through Draft → Reviewed → Finalized, the same workflow
+   * logbook entries and report sections use. The dashboard's "chapters
+   * finalized" progress is driven entirely by this field.
+   */
+  async updateChapterStatus(
+    userId: string,
+    projectId: string,
+    chapterNumber: number,
+    status: 'DRAFT' | 'REVIEWED' | 'FINALIZED',
+  ) {
+    const project = await this.findMineOrThrow(userId, projectId);
+    if (project.status === 'COMPLETED') {
+      throw new BadRequestException('This project is marked complete — reopen it to make changes.');
+    }
+
+    const chapter = project.chapters.find((c) => c.chapterNumber === chapterNumber);
+    if (!chapter) throw new NotFoundException('Chapter not found');
+    if (!chapter.content) {
+      throw new BadRequestException('Draft this chapter before changing its status.');
+    }
+
+    return this.prisma.projectChapter.update({
+      where: { id: chapter.id },
+      data: { status },
+    });
+  }
+
   /** Student explicitly marks the project complete — chapters go read-only after this. */
   async markComplete(userId: string, projectId: string) {
     const project = await this.findMineOrThrow(userId, projectId);
+
+    const remaining = project.chapters.filter((c) => c.status !== 'FINALIZED').length;
+    if (remaining > 0) {
+      throw new BadRequestException(
+        `Finalize all chapters before marking the project complete — ${remaining} still ${
+          remaining === 1 ? 'needs' : 'need'
+        } attention.`,
+      );
+    }
+
     return this.prisma.project.update({
       where: { id: project.id },
       data: { status: 'COMPLETED', completedAt: new Date() },
