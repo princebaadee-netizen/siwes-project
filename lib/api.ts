@@ -441,6 +441,16 @@ export const api = {
 
   getReport: () => request<ReportPayload>("/report"),
 
+  markReportComplete: () =>
+    request<{ report: SiwesReport; sections: ReportSectionView[] }>("/report/mark-complete", {
+      method: "POST",
+    }),
+
+  reopenReport: () =>
+    request<{ report: SiwesReport; sections: ReportSectionView[] }>("/report/reopen", {
+      method: "POST",
+    }),
+
   updateReport: (data: ReportUpdate) =>
     request<{ report: SiwesReport; sections: ReportSectionView[] }>("/report", {
       method: "PATCH",

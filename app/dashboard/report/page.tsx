@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  BadgeCheck,
   Check,
   Download,
   FileText,
@@ -11,6 +12,7 @@ import {
   Lock,
   Pencil,
   RefreshCw,
+  RotateCcw,
   Sparkles,
   X,
 } from "lucide-react";
@@ -88,6 +90,7 @@ export default function ReportPage() {
   const [updatingStatus, setUpdatingStatus] = useState<ReportSectionKind | null>(null);
 
   const [downloading, setDownloading] = useState<"pdf" | "docx" | null>(null);
+  const [savingReportStatus, setSavingReportStatus] = useState<"complete" | "reopen" | null>(null);
 
   const handleAuthFailure = useCallback(
     (err: any) => {
@@ -359,6 +362,22 @@ export default function ReportPage() {
     }
   }
 
+  async function updateReportStatus(action: "complete" | "reopen") {
+    setSavingReportStatus(action);
+    setError(null);
+    try {
+      if (action === "complete") await api.markReportComplete();
+      else await api.reopenReport();
+      await load();
+    } catch (err: any) {
+      if (!handleAuthFailure(err)) {
+        setError(err?.message || "Could not update the report status.");
+      }
+    } finally {
+      setSavingReportStatus(null);
+    }
+  }
+
   const hasContent = useMemo(
     () => !!payload?.sections.some((s) => s.content?.trim()),
     [payload]
@@ -383,6 +402,8 @@ export default function ReportPage() {
   }
 
   const { canGenerate, logbookCount, defaults, sections } = payload;
+  const isComplete = payload.report.status === "COMPLETED";
+  const finalizedCount = sections.filter((s) => s.status === "FINALIZED").length;
 
   return (
     <div className="max-w-2xl">
@@ -415,6 +436,58 @@ export default function ReportPage() {
         )}
       </div>
 
+      {hasContent && (
+        <Card className="mb-6 flex items-center justify-between gap-4 print:hidden">
+          <div>
+            <p className="font-mono text-sm text-ink/50">
+              {finalizedCount} of {sections.length} sections finalized
+            </p>
+            <span
+              className={`mt-1 inline-block rounded-full px-3 py-1 text-xs font-medium ${
+                isComplete ? "bg-forest/10 text-forest" : "bg-gold/20 text-gold-dark"
+              }`}
+            >
+              {isComplete ? "Completed" : "In progress"}
+            </span>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            {isComplete ? (
+              <Button
+                variant="outline"
+                onClick={() => updateReportStatus("reopen")}
+                disabled={savingReportStatus !== null}
+              >
+                {savingReportStatus === "reopen" ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <RotateCcw size={15} />
+                )}
+                {savingReportStatus === "reopen" ? "Reopening..." : "Reopen for revisions"}
+              </Button>
+            ) : (
+              <Button
+                onClick={() => updateReportStatus("complete")}
+                disabled={savingReportStatus !== null}
+              >
+                {savingReportStatus === "complete" ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <BadgeCheck size={15} />
+                )}
+                {savingReportStatus === "complete" ? "Completing..." : "Mark as complete"}
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {isComplete && (
+        <p className="mb-4 rounded-md bg-forest/10 px-4 py-3 text-sm text-forest">
+          This report is marked complete and is now read-only. Reopen it any time, free of
+          charge, if you need to make revisions.
+        </p>
+      )}
+
       {success && (
         <p className="mb-4 flex items-center gap-2 rounded-md bg-forest/10 px-4 py-3 text-sm text-forest">
           <Check size={15} /> {success}
@@ -438,6 +511,7 @@ export default function ReportPage() {
       )}
 
       {/* Generate */}
+      {!isComplete && (
       <Card className="mb-6 print:hidden">
         <h2 className="font-medium text-ink">Write your report</h2>
         {logbookCount === 0 ? (
@@ -470,8 +544,10 @@ export default function ReportPage() {
           </>
         )}
       </Card>
+      )}
 
       {/* Cover / title details */}
+      {!isComplete && (
       <Card className="mb-6 space-y-4 print:hidden">
         <div>
           <h2 className="font-medium text-ink">Cover &amp; title page</h2>
@@ -624,6 +700,7 @@ export default function ReportPage() {
           </Button>
         </div>
       </Card>
+      )}
 
       {/* Sections */}
       <div className="space-y-4">
@@ -648,6 +725,11 @@ export default function ReportPage() {
                       ? `${section.regenerationsUsed} rewrite${section.regenerationsUsed === 1 ? "" : "s"}`
                       : ""}
                   </span>
+                  {isComplete ? (
+                    <span className="font-mono text-xs text-ink/40">
+                      {STATUS_LABELS[section.status]}
+                    </span>
+                  ) : (
                   <div className="inline-flex items-center rounded-md border border-line p-0.5">
                     {STATUS_ORDER.map((s) => (
                       <button
@@ -670,6 +752,7 @@ export default function ReportPage() {
                       <Loader2 size={13} className="mx-1.5 my-auto animate-spin text-ink/40" />
                     )}
                   </div>
+                  )}
                 </div>
               </div>
 
@@ -703,7 +786,7 @@ export default function ReportPage() {
                 <p className="text-sm italic text-ink/40">Not written yet.</p>
               )}
 
-              {!isEditing && (
+              {!isEditing && !isComplete && (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3 print:hidden">
                   <TextInput
                     value={notes[section.kind] ?? ""}

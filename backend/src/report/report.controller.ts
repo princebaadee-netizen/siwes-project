@@ -95,6 +95,16 @@ export class ReportController {
     return this.reportService.generateAll(userId);
   }
 
+  @Post('mark-complete')
+  markComplete(@CurrentUserId() userId: string) {
+    return this.reportService.markComplete(userId);
+  }
+
+  @Post('reopen')
+  reopen(@CurrentUserId() userId: string) {
+    return this.reportService.reopen(userId);
+  }
+
   @Post('logo')
   @UseInterceptors(FileInterceptor('file', uploadOptions))
   uploadLogo(@CurrentUserId() userId: string, @UploadedFile() file?: Express.Multer.File) {

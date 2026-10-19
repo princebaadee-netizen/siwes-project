@@ -217,8 +217,16 @@ export class ReportService {
   // Edits
   // ---------------------------------------------------------------------------
 
+  /** A completed report is read-only until the student reopens it. */
+  private assertEditable(report: { status: string }) {
+    if (report.status === 'COMPLETED') {
+      throw new BadRequestException('This report is marked complete — reopen it to make changes.');
+    }
+  }
+
   async update(userId: string, dto: UpdateReportDto) {
     const report = await this.ensureReport(userId);
+    this.assertEditable(report);
     const data: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(dto)) {
       if (value === undefined) continue;
@@ -238,6 +246,7 @@ export class ReportService {
 
   async updateSection(userId: string, kind: ReportSectionKind, dto: UpdateSectionDto) {
     const report = await this.ensureReport(userId);
+    this.assertEditable(report);
     const section = await this.prisma.siwesReportSection.upsert({
       where: { reportId_kind: { reportId: report.id, kind } },
       create: {
@@ -252,6 +261,51 @@ export class ReportService {
       },
     });
     return this.viewSection(section);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Completion
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Student marks the report done — read-only from here, same workflow as the
+   * project's mark-complete. Every section must have content and be FINALIZED.
+   */
+  async markComplete(userId: string) {
+    const report = await this.ensureReport(userId);
+
+    const remaining = report.sections.filter(
+      (s) => !s.content?.trim() || s.status !== 'FINALIZED',
+    ).length;
+    if (remaining > 0) {
+      throw new BadRequestException(
+        `Finalize every section before marking the report complete — ${remaining} still ${
+          remaining === 1 ? 'needs' : 'need'
+        } attention.`,
+      );
+    }
+
+    const updated = await this.prisma.siwesReport.update({
+      where: { id: report.id },
+      data: { status: 'COMPLETED' },
+      include: { sections: true },
+    });
+    return { report: this.viewReport(updated), sections: this.viewSections(updated.sections) };
+  }
+
+  /** Free "Reopen for revisions" — same report, no new charge. */
+  async reopen(userId: string) {
+    const report = await this.ensureReport(userId);
+    if (report.status !== 'COMPLETED') {
+      throw new BadRequestException('Report is not marked complete');
+    }
+
+    const updated = await this.prisma.siwesReport.update({
+      where: { id: report.id },
+      data: { status: 'DRAFT' },
+      include: { sections: true },
+    });
+    return { report: this.viewReport(updated), sections: this.viewSections(updated.sections) };
   }
 
   // ---------------------------------------------------------------------------
@@ -279,6 +333,7 @@ export class ReportService {
     }
 
     const report = await this.ensureReport(userId);
+    this.assertEditable(report);
     const section = report.sections.find((s) => s.kind === kind);
 
     if (isRegeneration && section) {
@@ -340,6 +395,7 @@ export class ReportService {
     }
 
     const report = await this.ensureReport(userId);
+    this.assertEditable(report);
     const order = new Map(REPORT_SECTION_KINDS.map((k, i) => [k, i]));
     const pending = report.sections
       .filter((s) => !s.content?.trim())
@@ -445,6 +501,7 @@ export class ReportService {
     }
 
     const report = await this.ensureReport(userId);
+    this.assertEditable(report);
     const ext = extensionFor(file.mimetype);
     const dir = join(process.cwd(), 'uploads', 'report', userId);
     await mkdir(dir, { recursive: true });

@@ -147,6 +147,8 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 | `POST /report/sections/:kind/generate` | AI-generate one section (needs a placement; first section of each kind free per the pass rules) |
 | `POST /report/sections/:kind/regenerate` | Re-generate a section, bounded like chapter regenerations |
 | `POST /report/generate-all` | AI-generate every remaining section in one call (the UI loops per section instead — one big call timed out at the proxy) |
+| `POST /report/mark-complete` | Student marks the report done (read-only from here). Rejected until every section is `FINALIZED` with content |
+| `POST /report/reopen` | Free reopen for revisions |
 | `POST /report/logo` | Upload the student's signature/logo image (multipart, image-only, max 5 MB) → stored under `/uploads` |
 | `POST /report/cover-image` | Upload a custom cover image (same rules as the logo) |
 | `GET /report/export.pdf` | Server-rendered PDF of the whole report (Puppeteer/Chromium) |

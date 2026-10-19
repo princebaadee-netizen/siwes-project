@@ -431,6 +431,102 @@ describe('ReportService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
+
+  describe('markComplete / reopen', () => {
+    function finalizedSections() {
+      return makeSections(
+        Object.fromEntries(REPORT_SECTION_KINDS.map((k) => [k, { content: 'prose', status: 'FINALIZED' }])),
+      );
+    }
+
+    it('refuses while any section is blank or unfinished', async () => {
+      useReport(
+        makeReport({
+          sections: makeSections({ ABSTRACT: { content: 'prose', status: 'FINALIZED' } }),
+        }),
+      );
+
+      await expect(service.markComplete('u1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.siwesReport.update).not.toHaveBeenCalled();
+    });
+
+    it('completes the report once every section is finalized', async () => {
+      const report = makeReport({ sections: finalizedSections() });
+      useReport(report);
+      prisma.siwesReport.update.mockResolvedValue({ ...report, status: 'COMPLETED' });
+
+      const result = await service.markComplete('u1');
+
+      expect(prisma.siwesReport.update).toHaveBeenCalledWith({
+        where: { id: 'r1' },
+        data: { status: 'COMPLETED' },
+        include: { sections: true },
+      });
+      expect((result.report as any).status).toBe('COMPLETED');
+      expect((result.report as any).sections).toBeUndefined();
+    });
+
+    it('rejects a reopen on a report that is still a draft', async () => {
+      useReport(makeReport());
+
+      await expect(service.reopen('u1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.siwesReport.update).not.toHaveBeenCalled();
+    });
+
+    it('reopens a completed report back to draft', async () => {
+      const report = makeReport({ sections: finalizedSections(), status: 'COMPLETED' });
+      useReport(report);
+      prisma.siwesReport.update.mockResolvedValue({ ...report, status: 'DRAFT' });
+
+      const result = await service.reopen('u1');
+
+      expect(prisma.siwesReport.update).toHaveBeenCalledWith({
+        where: { id: 'r1' },
+        data: { status: 'DRAFT' },
+        include: { sections: true },
+      });
+      expect((result.report as any).status).toBe('DRAFT');
+    });
+  });
+
+  describe('completed report is read-only', () => {
+    const completed = makeReport({ status: 'COMPLETED' });
+
+    it('blocks cover edits', async () => {
+      useReport(completed);
+
+      await expect(service.update('u1', { institutionName: 'UNIPORT' } as any)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(prisma.siwesReport.update).not.toHaveBeenCalled();
+    });
+
+    it('blocks section edits', async () => {
+      useReport(completed);
+
+      await expect(
+        service.updateSection('u1', 'ABSTRACT', { content: 'sneaky edit' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.siwesReportSection.upsert).not.toHaveBeenCalled();
+    });
+
+    it('blocks AI generation before the pass check', async () => {
+      useReport(completed);
+
+      await expect(service.generateSection('u1', 'ABSTRACT')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(llm.generate).not.toHaveBeenCalled();
+    });
+
+    it('blocks image uploads before touching the filesystem', async () => {
+      useReport(completed);
+
+      await expect(
+        service.attachImage('u1', 'logoUrl', { mimetype: 'image/png', buffer: Buffer.from('') } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
 });
 
 describe('durationBetween', () => {
