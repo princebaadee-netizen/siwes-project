@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, Button, ProgressRing, FieldLabel, TextInput } from "@/components/ui";
+import { VerifyEmailNotice } from "@/components/verify-email-notice";
 import {
   Lock,
   CheckCircle2,
@@ -18,7 +19,7 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
-import { api, clearToken, getToken, formatNaira } from "@/lib/api";
+import { api, clearToken, getToken, formatNaira, isEmailNotVerified } from "@/lib/api";
 
 type ChapterStatus = "DRAFT" | "REVIEWED" | "FINALIZED";
 
@@ -77,6 +78,7 @@ export default function ProjectPage() {
   const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [hasProjectPass, setHasProjectPass] = useState(false);
+  const [emailBlocked, setEmailBlocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<"complete" | "reopen" | null>(null);
   const [drafting, setDrafting] = useState<number | null>(null);
@@ -123,6 +125,9 @@ export default function ProjectPage() {
       if (livePrices) setPrices(livePrices);
       const first = Array.isArray(projects) ? projects[0] ?? null : null;
       setProject(first);
+      // The server decides whether the gate applies (admins and dev runs are
+      // exempt), so trust its flag rather than guessing from emailVerified.
+      setEmailBlocked(me?.emailGateActive === true);
       setHasProjectPass(
         !!me &&
           (me.isAdmin ||
@@ -206,6 +211,8 @@ export default function ProjectPage() {
       setError(null);
     } catch (err: any) {
       if (!handleAuthFailure(err)) {
+        // The server may still refuse if the address was never confirmed.
+        if (isEmailNotVerified(err)) setEmailBlocked(true);
         setError(err?.message || "Could not draft that chapter.");
       }
     } finally {
@@ -367,6 +374,15 @@ export default function ProjectPage() {
         <p className="mb-4 rounded-md bg-rust/10 px-4 py-3 text-sm text-rust print:hidden">{error}</p>
       )}
 
+      {emailBlocked && (
+        <div className="mb-6 print:hidden">
+          <VerifyEmailNotice
+            message="Verify your email address to write your chapters with AI."
+            onVerified={load}
+          />
+        </div>
+      )}
+
       <Card className="mb-6 flex items-center justify-between gap-4">
         <ProgressRing percent={percent} label="chapters finalized" />
         <div className="text-right">
@@ -510,7 +526,7 @@ export default function ProjectPage() {
                     )}
                     <Button
                       onClick={() => draftChapter(ch.chapterNumber)}
-                      disabled={drafting === ch.chapterNumber}
+                      disabled={drafting === ch.chapterNumber || emailBlocked}
                     >
                       {drafting === ch.chapterNumber ? (
                         <Loader2 size={15} className="animate-spin" />

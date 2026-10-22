@@ -64,7 +64,7 @@ This builds the API from `backend/Dockerfile`, starts Postgres, and runs `prisma
 
 ## What's built
 
-- **Auth** — sign up, sign in, a **forgot-password** flow (`/forgot-password` → `/reset-password`) that emails a one-hour, single-use reset link, and **email verification** on signup (`/verify-email?token=...`, with a resend banner on the dashboard until confirmed). With no mail provider configured these links are written to the backend console, so both flows are testable locally.
+- **Auth** — sign up, sign in, a **forgot-password** flow (`/forgot-password` → `/reset-password`) that emails a one-hour, single-use reset link, and **email verification** on signup (`/verify-email?token=...`). With no mail provider configured these links are written to the backend console, so both flows are testable locally. An unconfirmed address is a **soft gate**: you can sign in, browse and edit everything, but the API refuses the actions that cost money or burn AI tokens — every AI route and starting a checkout — until the address is confirmed, with a "verify your email" prompt next to the blocked button and a one-click resend. Admins and a dev run with `AI_DEV_UNLOCK=true` are exempt.
 - **`/onboarding`** — module choice → profile → **account (email/password — creates a real account)** → IT placement details → attendance pattern (day-count + constrained day-picker) → project topic (if chosen) → review. Clicking "Go to dashboard" now actually calls the backend: signup → save profile → create IT placement (which generates the holiday-aware calendar server-side) → create project (which auto-generates the 5 chapters). Local `localStorage` state is still kept as a working cache/draft while filling the form, matching the plan's "offline continuity" design.
 - **`/dashboard`** — tabbed side navigation shell.
   - **Overview**: fetches real chapter-completion and logbook progress from the backend.
@@ -103,6 +103,7 @@ app/
 components/
   ui.tsx
   attendance-picker.tsx
+  verify-email-notice.tsx — the "verify your email" prompt shown beside a blocked AI/purchase action
 lib/
   types.ts                — shared TypeScript types matching the plan's data model
   store.tsx               — React Context + localStorage (local draft/cache)

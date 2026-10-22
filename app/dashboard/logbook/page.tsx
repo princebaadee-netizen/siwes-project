@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppStore } from "@/lib/store";
 import { Card, Button, FieldLabel, TextInput } from "@/components/ui";
+import { VerifyEmailNotice } from "@/components/verify-email-notice";
 import { PenLine, Sparkles, Loader2, Trash2, CalendarCheck, Check, Printer, Pencil, FileText } from "lucide-react";
-import { api, clearToken, getToken, formatNaira } from "@/lib/api";
+import { api, clearToken, getToken, formatNaira, isEmailNotVerified } from "@/lib/api";
 
 interface CalendarDay {
   date: string;
@@ -75,6 +76,7 @@ export default function LogbookPage() {
     spent: boolean;
   } | null>(null);
   const [hasItPass, setHasItPass] = useState(false);
+  const [emailBlocked, setEmailBlocked] = useState(false);
   const [prices, setPrices] = useState({
     IT_SIWES_PASS: 10_000,
     PROJECT_PASS: 20_000,
@@ -111,6 +113,9 @@ export default function LogbookPage() {
       setEntries(entryList);
       if (livePrices) setPrices(livePrices);
       if (placement?.trial) setTrial(placement.trial);
+      // The server decides whether the gate applies (admins and dev runs are
+      // exempt), so trust its flag rather than guessing from emailVerified.
+      setEmailBlocked(me?.emailGateActive === true);
       // A successful bundle grants the IT/SIWES Pass too. Admins skip the
       // paywall server-side, so treat them as owning it for the UI.
       setHasItPass(
@@ -193,6 +198,8 @@ export default function LogbookPage() {
       setAiDraft(true);
     } catch (err: any) {
       if (!handleAuthFailure(err)) {
+        // The server may still refuse if the address was never confirmed.
+        if (isEmailNotVerified(err)) setEmailBlocked(true);
         setError(err?.message || "Could not polish that entry.");
       }
     } finally {
@@ -324,6 +331,8 @@ export default function LogbookPage() {
       }
     } catch (err: any) {
       if (!handleAuthFailure(err)) {
+        // The server may still refuse if the address was never confirmed.
+        if (isEmailNotVerified(err)) setEmailBlocked(true);
         setError(err?.message || "Could not generate your logbook.");
       }
     } finally {
@@ -413,6 +422,15 @@ export default function LogbookPage() {
         </Card>
       )}
 
+      {emailBlocked && (
+        <div className="mb-6 print:hidden">
+          <VerifyEmailNotice
+            message="Verify your email address to use AI drafting in your logbook."
+            onVerified={load}
+          />
+        </div>
+      )}
+
       {trial && !hasItPass && (
         <div className="mb-6 print:hidden">
           {trial.spent ? (
@@ -480,7 +498,10 @@ export default function LogbookPage() {
                   ? `Free AI week used up · the IT/SIWES Pass (${formatNaira(prices.IT_SIWES_PASS)}) unlocks the rest.`
                   : `Free trial: ${trial?.remaining ?? 7} of ${trial?.total ?? 7} AI days left · rest needs the IT/SIWES Pass (${formatNaira(prices.IT_SIWES_PASS)}).`}
             </p>
-            <Button onClick={runBulkFillup} disabled={generating || !bulkText.trim()}>
+            <Button
+              onClick={runBulkFillup}
+              disabled={generating || !bulkText.trim() || emailBlocked}
+            >
               {generating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
               {generating ? "Drafting..." : "Generate logbook"}
             </Button>
@@ -538,7 +559,7 @@ export default function LogbookPage() {
                   <button
                     type="button"
                     onClick={polishEntry}
-                    disabled={polishing || saving || !selectedDate || !activity.trim()}
+                    disabled={polishing || saving || !selectedDate || !activity.trim() || emailBlocked}
                     className="focus-ring inline-flex items-center gap-1.5 text-xs font-medium text-forest underline decoration-forest/30 underline-offset-4 disabled:opacity-40"
                   >
                     {polishing ? (

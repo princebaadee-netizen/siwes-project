@@ -18,10 +18,24 @@ export function clearToken() {
 
 class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
+}
+
+/** The backend's marker for a request refused because the email is unverified. */
+export const EMAIL_NOT_VERIFIED = "EMAIL_NOT_VERIFIED";
+
+/**
+ * True when the request was refused because the account's email address has
+ * not been confirmed — the UI shows a "verify your email" prompt instead of
+ * a generic failure.
+ */
+export function isEmailNotVerified(err: unknown): boolean {
+  return err instanceof ApiError && err.code === EMAIL_NOT_VERIFIED;
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -54,7 +68,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       (res.status >= 500
         ? "The server had a problem handling that request. Please try again."
         : "Request failed. Please try again.");
-    throw new ApiError(Array.isArray(message) ? message.join(", ") : message, res.status);
+    throw new ApiError(
+      Array.isArray(message) ? message.join(", ") : message,
+      res.status,
+      body?.code,
+    );
   }
   return body as T;
 }

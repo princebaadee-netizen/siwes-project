@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutGrid, BookText, FileText, GraduationCap, User, LogOut, MailWarning, ShieldCheck, CalendarDays } from "lucide-react";
+import { LayoutGrid, BookText, FileText, GraduationCap, User, LogOut, ShieldCheck, CalendarDays } from "lucide-react";
 import { ReactNode, useEffect, useState } from "react";
 import { api, clearToken, getToken } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
@@ -20,10 +20,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { hydrated } = useAppStore();
   const [authorised, setAuthorised] = useState(false);
-  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [resent, setResent] = useState(false);
-  const [resending, setResending] = useState(false);
 
   // Without a token the dashboard has nothing to show — every panel reads
   // from server data that would 401 — so send people to sign in first.
@@ -36,30 +33,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     setAuthorised(true);
   }, [hydrated, router]);
 
-  // Drives the "verify your email" banner. Default to verified on error so a
-  // transient fetch failure never nags someone who is already verified.
+  // The admin tabs come from the email allowlist. The "verify your email"
+  // banner lives with the actions it blocks, not here, so a student never sees
+  // two prompts for the same thing.
   useEffect(() => {
     if (!authorised) return;
     api
       .getMe()
-      .then((me) => {
-        setEmailVerified(me.emailVerified ?? true);
-        setIsAdmin(!!me.isAdmin);
-      })
-      .catch(() => setEmailVerified(true));
+      .then((me) => setIsAdmin(!!me.isAdmin))
+      .catch(() => setIsAdmin(false));
   }, [authorised]);
-
-  async function resend() {
-    setResending(true);
-    try {
-      await api.resendVerification();
-      setResent(true);
-    } catch {
-      // leave the banner up; the button stays available to retry
-    } finally {
-      setResending(false);
-    }
-  }
 
   function logout() {
     clearToken();
@@ -112,29 +95,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </button>
         </nav>
 
-        <main className="flex-1 px-6 py-10 print:p-0 sm:px-10">
-          {emailVerified === false && (
-            <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-md border border-gold/40 bg-gold/10 px-4 py-3 text-sm text-ink print:hidden">
-              <span className="flex items-center gap-2">
-                <MailWarning size={16} className="text-gold" />
-                {resent
-                  ? "Verification email sent — check your inbox."
-                  : "Please verify your email address to secure your account."}
-              </span>
-              {!resent && (
-                <button
-                  type="button"
-                  onClick={resend}
-                  disabled={resending}
-                  className="focus-ring font-medium text-forest underline decoration-forest/30 underline-offset-4 disabled:opacity-50"
-                >
-                  {resending ? "Sending..." : "Resend email"}
-                </button>
-              )}
-            </div>
-          )}
-          {children}
-        </main>
+        <main className="flex-1 px-6 py-10 print:p-0 sm:px-10">{children}</main>
       </div>
     </div>
   );

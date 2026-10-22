@@ -17,10 +17,12 @@ import {
   X,
 } from "lucide-react";
 import { Button, Card, FieldLabel, TextInput } from "@/components/ui";
+import { VerifyEmailNotice } from "@/components/verify-email-notice";
 import {
   api,
   clearToken,
   getToken,
+  isEmailNotVerified,
   ReportPayload,
   ReportSectionKind,
   ReportSectionStatus,
@@ -71,6 +73,7 @@ function toDateInput(iso?: string | null): string {
 export default function ReportPage() {
   const router = useRouter();
   const [payload, setPayload] = useState<ReportPayload | null>(null);
+  const [emailBlocked, setEmailBlocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -111,7 +114,13 @@ export default function ReportPage() {
     }
     setLoading(true);
     try {
-      const data = await api.getReport();
+      const [data, me] = await Promise.all([
+        api.getReport(),
+        // The server decides whether the gate applies (admins and dev runs are
+        // exempt), so trust its flag rather than guessing from emailVerified.
+        api.getMe().catch(() => null),
+      ]);
+      setEmailBlocked(me?.emailGateActive === true);
       setPayload(data);
       setForm({
         institutionName: data.report.institutionName ?? data.defaults.school ?? "",
@@ -246,6 +255,8 @@ export default function ReportPage() {
             handleAuthFailure(err);
             return;
           }
+          // The server may still refuse if the address was never confirmed.
+          if (isEmailNotVerified(err)) setEmailBlocked(true);
           lastError = err?.message || null;
           failed.push(section.title);
         }
@@ -283,6 +294,8 @@ export default function ReportPage() {
       flash(isRegeneration ? "Section rewritten." : "Section written.");
     } catch (err: any) {
       if (!handleAuthFailure(err)) {
+        // The server may still refuse if the address was never confirmed.
+        if (isEmailNotVerified(err)) setEmailBlocked(true);
         setError(err?.message || "Could not write that section.");
       }
     } finally {
@@ -497,6 +510,15 @@ export default function ReportPage() {
         <p className="mb-4 rounded-md bg-rust/10 px-4 py-3 text-sm text-rust">{error}</p>
       )}
 
+      {emailBlocked && (
+        <div className="mb-6">
+          <VerifyEmailNotice
+            message="Verify your email address to write your report with AI."
+            onVerified={load}
+          />
+        </div>
+      )}
+
       {!canGenerate && (
         <p className="mb-6 flex items-start gap-2 rounded-md bg-gold/15 px-4 py-3 text-sm text-gold-dark">
           <Lock size={15} className="mt-0.5 shrink-0" />
@@ -530,7 +552,7 @@ export default function ReportPage() {
               part afterwards.
             </p>
             <div className="flex justify-end">
-              <Button onClick={generateAll} disabled={generatingAll || !canGenerate}>
+              <Button onClick={generateAll} disabled={generatingAll || !canGenerate || emailBlocked}>
                 {generatingAll ? (
                   <Loader2 size={15} className="animate-spin" />
                 ) : (
@@ -803,7 +825,7 @@ export default function ReportPage() {
                     <Button
                       variant="outline"
                       onClick={() => writeSection(section.kind, hasSectionContent)}
-                      disabled={isGenerating || generatingAll || !canGenerate}
+                      disabled={isGenerating || generatingAll || !canGenerate || emailBlocked}
                     >
                       {isGenerating ? (
                         <Loader2 size={15} className="animate-spin" />

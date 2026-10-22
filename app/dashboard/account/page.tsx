@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, CheckCircle2, Sparkles } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { Card, FieldLabel, TextInput, Button } from "@/components/ui";
+import { VerifyEmailNotice } from "@/components/verify-email-notice";
 import { AttendancePicker } from "@/components/attendance-picker";
 import {
   api,
@@ -12,6 +13,7 @@ import {
   getToken,
   formatNaira,
   formatKobo,
+  isEmailNotVerified,
   ProjectTopic,
   SuggestedTopic,
   TopicSource,
@@ -52,6 +54,7 @@ export default function AccountPage() {
   const [warning, setWarning] = useState<string | null>(null);
   const [purchases, setPurchases] = useState<any[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [emailBlocked, setEmailBlocked] = useState(false);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
   const [prices, setPrices] = useState({
@@ -135,6 +138,9 @@ export default function AccountPage() {
       setModuleChoice(me.moduleChoice ?? null);
       setPurchases(Array.isArray(me.purchases) ? me.purchases : []);
       setIsAdmin(!!me.isAdmin);
+      // The server decides whether the gate applies (admins and dev runs are
+      // exempt), so trust its flag rather than guessing from emailVerified.
+      setEmailBlocked(me.emailGateActive === true);
 
       const p = me.itPlacement;
       if (p) {
@@ -245,6 +251,8 @@ export default function AccountPage() {
       flash("Pass activated (dev mode).");
     } catch (err: any) {
       if (!handleAuthFailure(err)) {
+        // The server may still refuse if the address was never confirmed.
+        if (isEmailNotVerified(err)) setEmailBlocked(true);
         setError(err?.message || "Could not start the payment.");
       }
     } finally {
@@ -389,6 +397,8 @@ export default function AccountPage() {
       setSuggestedField(result.field);
     } catch (err: any) {
       if (!handleAuthFailure(err)) {
+        // The server may still refuse if the address was never confirmed.
+        if (isEmailNotVerified(err)) setEmailBlocked(true);
         setError(err?.message || "Could not get topic suggestions.");
       }
     } finally {
@@ -773,7 +783,11 @@ export default function AccountPage() {
                         <p className="font-mono text-xs text-ink/40">
                           {suggestedField && suggestions.length > 0 ? `Field: ${suggestedField}` : ""}
                         </p>
-                        <Button variant="outline" onClick={runSuggestTopics} disabled={suggesting}>
+                        <Button
+                          variant="outline"
+                          onClick={runSuggestTopics}
+                          disabled={suggesting || emailBlocked}
+                        >
                           {suggesting ? (
                             <Loader2 size={15} className="animate-spin" />
                           ) : (
@@ -829,6 +843,14 @@ export default function AccountPage() {
       <Card>
         <h2 className="mb-1 font-medium text-ink">Passes</h2>
         <p className="mb-4 text-sm text-ink/60">One-time purchases — no recurring billing.</p>
+        {emailBlocked && (
+          <div className="mb-4">
+            <VerifyEmailNotice
+              message="Verify your email address to buy a pass or get AI topic suggestions."
+              onVerified={load}
+            />
+          </div>
+        )}
         {(
           [
             { type: "IT_SIWES_PASS", label: "IT/SIWES Pass" },
@@ -854,7 +876,7 @@ export default function AccountPage() {
                 <Button
                   variant="outline"
                   onClick={() => buyPass(item.type)}
-                  disabled={buying !== null}
+                  disabled={buying !== null || emailBlocked}
                 >
                   {isBuying ? "Starting..." : "Buy"}
                 </Button>
