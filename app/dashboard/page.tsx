@@ -63,7 +63,7 @@ export default function DashboardOverview() {
       <h1 className="mb-1 font-slab text-2xl font-semibold text-ink">
         Welcome{state.profile.fullName ? `, ${state.profile.fullName.split(" ")[0]}` : ""}
       </h1>
-      <p className="mb-8 text-ink/60">Here's where things stand.</p>
+      <p className="mb-8 text-ink/60">Here&apos;s where things stand.</p>
 
       <div className="grid gap-5 sm:grid-cols-2">
         {showLogbook && (

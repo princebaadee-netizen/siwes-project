@@ -534,7 +534,7 @@ export default function LogbookPage() {
               </div>
               <div>
                 <div className="flex items-center justify-between gap-3">
-                  <FieldLabel>Today's activity</FieldLabel>
+                  <FieldLabel>Today&apos;s activity</FieldLabel>
                   <button
                     type="button"
                     onClick={polishEntry}

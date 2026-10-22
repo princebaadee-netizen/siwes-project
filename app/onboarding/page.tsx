@@ -344,7 +344,7 @@ export default function OnboardingPage() {
     return (
       <div>
         <h1 className="mb-2 font-slab text-2xl font-semibold text-ink">Your attendance pattern</h1>
-        <p className="mb-6 text-ink/60">We'll only build logbook entries for the days you actually attend.</p>
+        <p className="mb-6 text-ink/60">We&apos;ll only build logbook entries for the days you actually attend.</p>
         <AttendancePicker
           daysPerWeek={state.placement.daysPerWeek}
           selected={state.placement.attendancePattern}
@@ -370,7 +370,7 @@ export default function OnboardingPage() {
             />
           </div>
           <div>
-            <FieldLabel>Supervisor's name (optional, for your cover page)</FieldLabel>
+            <FieldLabel>Supervisor&apos;s name (optional, for your cover page)</FieldLabel>
             <TextInput
               value={state.project.supervisorName}
               onChange={(e) => setState((prev) => ({ ...prev, project: { ...prev.project, supervisorName: e.target.value } }))}
@@ -385,8 +385,8 @@ export default function OnboardingPage() {
   function ReviewStep() {
     return (
       <div>
-        <h1 className="mb-2 font-slab text-2xl font-semibold text-ink">You're all set</h1>
-        <p className="mb-6 text-ink/60">Here's what we've got. You can edit any of this later in Account.</p>
+        <h1 className="mb-2 font-slab text-2xl font-semibold text-ink">You&apos;re all set</h1>
+        <p className="mb-6 text-ink/60">Here&apos;s what we&apos;ve got. You can edit any of this later in Account.</p>
         <Card className="space-y-3 font-mono text-sm">
           <Row label="Name" value={state.profile.fullName} />
           <Row label="Email" value={email} />
