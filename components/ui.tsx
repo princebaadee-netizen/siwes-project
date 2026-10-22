@@ -71,8 +71,23 @@ export function ProgressRing({ percent, label }: { percent: number; label: strin
   );
 }
 
-export function FieldLabel({ children }: { children: ReactNode }) {
-  return <label className="mb-1.5 block text-sm font-medium text-ink/80">{children}</label>;
+/**
+ * A label for a form field. Pass `htmlFor` (and the matching `id` on the
+ * input) so the label is actually attached to the field — a screen reader
+ * otherwise announces the field with no name at all.
+ */
+export function FieldLabel({
+  children,
+  htmlFor,
+}: {
+  children: ReactNode;
+  htmlFor?: string;
+}) {
+  return (
+    <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-ink/80">
+      {children}
+    </label>
+  );
 }
 
 export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {

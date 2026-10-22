@@ -515,7 +515,7 @@ export default function LogbookPage() {
             <FieldLabel>Log an attendance day</FieldLabel>
             <div className="space-y-4">
               <div>
-                <FieldLabel>Date</FieldLabel>
+                <FieldLabel htmlFor="logbook-date">Date</FieldLabel>
                 {loading ? (
                   <p className="flex items-center gap-2 py-2.5 text-sm text-ink/50">
                     <Loader2 size={15} className="animate-spin" /> Loading your calendar...
@@ -526,6 +526,7 @@ export default function LogbookPage() {
                   </p>
                 ) : (
                   <TextInput
+                    id="logbook-date"
                     type="date"
                     value={selectedDate}
                     min={openDays[0].date}

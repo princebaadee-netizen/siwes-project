@@ -23,11 +23,14 @@ No database or network needed — every suite mocks its dependencies.
 npm test           # backend (Jest) + frontend (Vitest)
 npm run test:api   # backend only — Jest + ts-jest
 npm run test:web   # frontend only — Vitest (lib/sync.ts, lib/api.ts helpers)
+npm run test:e2e   # browser tests — Playwright (needs `npx playwright install chromium` once)
 ```
+
+The browser tests drive the real Next.js app in Chromium with the API stubbed **inside the browser** (`tests/e2e/fake-api.ts`), so they need neither a database nor the backend running. `next dev` is started for them on port 3100, away from any dev server you already have open. They cover signing in, the dashboard shell, the email-verification gate (the AI actions and the checkout close for an unconfirmed address, admins stay open) and recording a logbook entry.
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push/PR: the **backend** job typechecks via `nest build`, runs the Jest suite, and builds; the **frontend** job runs `tsc --noEmit`, the Vitest suite, and `next build`. It needs no database or secrets (the tests are fully mocked). It only kicks in once the repo is pushed to GitHub.
+`.github/workflows/ci.yml` runs on every push/PR: the **backend** job typechecks via `nest build`, runs the Jest suite, and builds; the **frontend** job runs `tsc --noEmit`, lint, the Vitest suite, and `next build`; the **e2e** job installs Chromium and runs the Playwright suite. None of it needs a database or secrets — the tests are fully mocked. It only kicks in once the repo is pushed to GitHub.
 
 ## Deploying
 
@@ -108,6 +111,12 @@ lib/
   types.ts                — shared TypeScript types matching the plan's data model
   store.tsx               — React Context + localStorage (local draft/cache)
   api.ts                  — the backend API client (all calls go to same-origin /api)
+tests/
+  e2e/
+    fake-api.ts           — the stubbed API the browser tests run against
+    auth.spec.ts          — signing in and the dashboard shell
+    email-gate.spec.ts    — the email-verification gate in the UI
+    logbook.spec.ts       — recording a logbook entry
 scripts/
   dev.mjs                 — runs the API and web dev servers together
 backend/                  — NestJS + Prisma API (its own package.json, .env, README)

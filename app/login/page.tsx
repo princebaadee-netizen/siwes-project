@@ -62,8 +62,9 @@ export default function LoginPage() {
       <form onSubmit={submit} noValidate>
         <div className="space-y-4">
           <div>
-            <FieldLabel>Email</FieldLabel>
+            <FieldLabel htmlFor="login-email">Email</FieldLabel>
             <TextInput
+              id="login-email"
               type="email"
               autoComplete="email"
               value={email}
@@ -72,8 +73,9 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <FieldLabel>Password</FieldLabel>
+            <FieldLabel htmlFor="login-password">Password</FieldLabel>
             <TextInput
+              id="login-password"
               type="password"
               autoComplete="current-password"
               value={password}
