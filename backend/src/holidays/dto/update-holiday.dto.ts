@@ -1,4 +1,5 @@
 import { IsDateString, IsOptional, IsString, Matches } from 'class-validator';
+import { IsNotBlank } from '../../common/validators';
 
 export class UpdateHolidayDto {
   @IsOptional()
@@ -8,5 +9,6 @@ export class UpdateHolidayDto {
 
   @IsOptional()
   @IsString()
+  @IsNotBlank()
   name?: string;
 }

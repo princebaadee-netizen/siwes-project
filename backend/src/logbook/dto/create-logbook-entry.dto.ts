@@ -1,5 +1,14 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString, IsUrl } from 'class-validator';
+import {
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUrl,
+  MaxLength,
+  ValidateIf,
+} from 'class-validator';
 import { LogbookEntrySource } from '@prisma/client';
+import { IsNotBlank } from '../../common/validators';
 
 export class CreateLogbookEntryDto {
   @IsString()
@@ -7,11 +16,16 @@ export class CreateLogbookEntryDto {
   date: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsNotBlank()
+  @MaxLength(2000)
   activity: string;
 
+  // An empty string is allowed through and stored as null, so a cleared
+  // field never blocks the save.
   @IsOptional()
+  @ValidateIf((_object, value) => value !== '')
   @IsUrl()
+  @MaxLength(500)
   evidenceUrl?: string;
 
   // Set by the client to label an entry the "Polish with AI" flow produced.

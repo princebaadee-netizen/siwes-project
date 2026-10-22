@@ -8,8 +8,10 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
+import { IsNotBlank } from '../../common/validators';
 
 const VALID_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
@@ -25,14 +27,19 @@ export const MAX_PLACEMENT_MONTHS = 24;
 
 export class CreatePlacementDto {
   @IsNotEmpty()
+  @IsString()
+  @IsNotBlank()
+  @MaxLength(200)
   companyName: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   companyAddress?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   industrySector?: string;
 
   @IsDateString()

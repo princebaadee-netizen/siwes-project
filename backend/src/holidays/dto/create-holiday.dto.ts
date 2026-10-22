@@ -1,4 +1,5 @@
 import { IsDateString, IsNotEmpty, IsString, Matches } from 'class-validator';
+import { IsNotBlank } from '../../common/validators';
 
 export class CreateHolidayDto {
   @IsDateString()
@@ -7,5 +8,6 @@ export class CreateHolidayDto {
 
   @IsNotEmpty()
   @IsString()
+  @IsNotBlank()
   name: string;
 }
