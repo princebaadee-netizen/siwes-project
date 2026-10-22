@@ -9,6 +9,11 @@ dev.err
 dev.out
 *.tsbuildinfo
 
+# Playwright browser tests
+/playwright-report
+/test-results
+/.playwright
+
 # NestJS backend — installed and run via `npm --prefix backend`
 backend/node_modules
 backend/dist
