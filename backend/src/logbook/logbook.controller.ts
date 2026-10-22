@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { VerifiedEmailGuard } from '../auth/verified-email.guard';
 import { AiThrottlerGuard } from '../common/ai-throttler.guard';
 import { CurrentUserId } from '../auth/current-user.decorator';
 import { LogbookService } from './logbook.service';
@@ -25,17 +26,18 @@ export class LogbookController {
   }
 
   // Each of these spends a paid AI call, so they are capped well below the
-  // global per-IP limit to blunt cost abuse.
+  // global per-IP limit to blunt cost abuse. The verified-email guard runs
+  // first, so a refused request never costs a rate-limit slot.
   @Post('bulk')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @UseGuards(AiThrottlerGuard)
+  @UseGuards(VerifiedEmailGuard, AiThrottlerGuard)
   bulkFillup(@CurrentUserId() userId: string, @Body() dto: BulkFillupDto) {
     return this.logbookService.bulkFillup(userId, dto);
   }
 
   @Post('polish')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @UseGuards(AiThrottlerGuard)
+  @UseGuards(VerifiedEmailGuard, AiThrottlerGuard)
   polish(@CurrentUserId() userId: string, @Body() dto: PolishLogbookDto) {
     return this.logbookService.polish(userId, dto);
   }

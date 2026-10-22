@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { VerifiedEmailGuard } from '../auth/verified-email.guard';
 import { AiThrottlerGuard } from '../common/ai-throttler.guard';
 import { CurrentUserId } from '../auth/current-user.decorator';
 import { ProjectsService } from './projects.service';
@@ -29,7 +30,7 @@ export class ProjectsController {
   // routes. It is a static path, so it never collides with the `:id` routes.
   @Post('suggest-topics')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @UseGuards(AiThrottlerGuard)
+  @UseGuards(VerifiedEmailGuard, AiThrottlerGuard)
   suggestTopics(@CurrentUserId() userId: string, @Body() dto: SuggestTopicsDto) {
     return this.projectsService.suggestTopics(userId, dto);
   }
@@ -48,10 +49,11 @@ export class ProjectsController {
   }
 
   // AI-backed routes: capped below the global limit since each one costs a
-  // paid model call.
+  // paid model call. The verified-email guard runs first, so a refused request
+  // never costs a rate-limit slot.
   @Post(':id/chapters/:chapterNumber/draft')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @UseGuards(AiThrottlerGuard)
+  @UseGuards(VerifiedEmailGuard, AiThrottlerGuard)
   draftChapter(
     @CurrentUserId() userId: string,
     @Param('id') id: string,
@@ -63,7 +65,7 @@ export class ProjectsController {
 
   @Post(':id/chapters/:chapterNumber/regenerate')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @UseGuards(AiThrottlerGuard)
+  @UseGuards(VerifiedEmailGuard, AiThrottlerGuard)
   regenerateChapter(
     @CurrentUserId() userId: string,
     @Param('id') id: string,

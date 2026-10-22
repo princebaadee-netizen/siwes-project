@@ -18,6 +18,7 @@ import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { ReportSectionKind } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { VerifiedEmailGuard } from '../auth/verified-email.guard';
 import { AiThrottlerGuard } from '../common/ai-throttler.guard';
 import { CurrentUserId } from '../auth/current-user.decorator';
 import { ReportService } from './report.service';
@@ -68,7 +69,7 @@ export class ReportController {
 
   @Post('sections/:kind/generate')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @UseGuards(AiThrottlerGuard)
+  @UseGuards(VerifiedEmailGuard, AiThrottlerGuard)
   generateSection(
     @CurrentUserId() userId: string,
     @Param('kind', ReportSectionKindPipe) kind: ReportSectionKind,
@@ -79,7 +80,7 @@ export class ReportController {
 
   @Post('sections/:kind/regenerate')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @UseGuards(AiThrottlerGuard)
+  @UseGuards(VerifiedEmailGuard, AiThrottlerGuard)
   regenerateSection(
     @CurrentUserId() userId: string,
     @Param('kind', ReportSectionKindPipe) kind: ReportSectionKind,
@@ -90,7 +91,7 @@ export class ReportController {
 
   @Post('generate-all')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  @UseGuards(AiThrottlerGuard)
+  @UseGuards(VerifiedEmailGuard, AiThrottlerGuard)
   generateAll(@CurrentUserId() userId: string) {
     return this.reportService.generateAll(userId);
   }

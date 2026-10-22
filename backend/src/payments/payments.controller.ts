@@ -13,6 +13,7 @@ import {
 import { Request } from 'express';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { VerifiedEmailGuard } from '../auth/verified-email.guard';
 import { CurrentUserId } from '../auth/current-user.decorator';
 import { PaymentsService } from './payments.service';
 import { PaystackService } from './paystack.service';
@@ -33,7 +34,10 @@ export class PaymentsController {
     return getPrices();
   }
 
-  @UseGuards(JwtAuthGuard)
+  // A checkout is the one place a student parts with money, so the address on
+  // the account has to be real first — a typo here means a receipt nobody can
+  // read and a refund nobody can match.
+  @UseGuards(JwtAuthGuard, VerifiedEmailGuard)
   @Post('initialize')
   initialize(@CurrentUserId() userId: string, @Body() dto: InitializePaymentDto) {
     return this.payments.initialize(userId, dto.productType);

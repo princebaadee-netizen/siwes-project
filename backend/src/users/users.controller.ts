@@ -34,7 +34,16 @@ export class UsersController {
     if (!user) return user;
     // Derived from the email allowlist so the client can decide whether to
     // surface admin-only UI; the guard is still the real enforcement.
-    return { ...user, isAdmin: isAdminEmail(this.config, user.email) };
+    const isAdmin = isAdminEmail(this.config, user.email);
+    return {
+      ...user,
+      isAdmin,
+      // The server is the only place that knows whether the email gate really
+      // applies: admins and dev-unlocked runs are exempt. Echoing that here
+      // stops the client from locking a UI the backend would happily open.
+      emailGateActive:
+        !isAdmin && process.env.AI_DEV_UNLOCK !== 'true' && !user.emailVerified,
+    };
   }
 
   @Patch('me')

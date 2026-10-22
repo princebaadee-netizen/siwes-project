@@ -82,7 +82,16 @@ The "Forgot password?" flow (`POST /auth/forgot-password`, `POST /auth/reset-pas
 
 ## Email verification
 
-Signing up sends a confirmation email (`/verify-email?token=...`); the link is a signed JWT with a `purpose: 'verify-email'` claim and a 24-hour expiry, so no extra table is needed — verification just flips `User.emailVerified`. The dashboard shows a resend banner until the address is confirmed. Like the reset flow, when no mail provider is configured the link is written to the backend console, and verification never blocks access (it's a nudge, not a gate). This adds one column (`emailVerified`); apply it with `npm run prisma:migrate` (migration `add_email_verification`).
+Signing up sends a confirmation email (`/verify-email?token=...`); the link is a signed JWT with a `purpose: 'verify-email'` claim and a 24-hour expiry, so no extra table is needed — verification just flips `User.emailVerified`. Like the reset flow, when no mail provider is configured the link is written to the backend console.
+
+Verification is a **soft gate**, not a wall. An unconfirmed account can sign in, read, edit, and use everything that costs nothing; what it cannot do is spend money or burn AI tokens. `VerifiedEmailGuard` refuses, with `403` and a machine-readable `code: "EMAIL_NOT_VERIFIED"`:
+
+- every AI route — `POST /logbook/bulk`, `POST /logbook/polish`, `POST /projects/suggest-topics`, `POST /projects/:id/chapters/:n/draft`, `POST /projects/:id/chapters/:n/regenerate`, `POST /report/sections/:kind/generate`, `POST /report/sections/:kind/regenerate`, `POST /report/generate-all`
+- `POST /payments/initialize` — starting a checkout
+
+The guard is applied *before* `AiThrottlerGuard`, so a refused request never consumes a rate-limit slot. Two exemptions: admins (the `ADMIN_EMAILS` allowlist, the same list that skips the paywall) and `AI_DEV_UNLOCK=true`, a dev-only flag that also opens the paywall. `GET /users/me` echoes `emailGateActive` so the client knows exactly whether to show the "verify your email" prompt — it never guesses from `emailVerified` on its own.
+
+This adds one column (`emailVerified`); apply it with `npm run prisma:migrate` (migration `add_email_verification`).
 
 ## Payments (optional)
 
@@ -105,7 +114,7 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 | `POST /auth/verify-email` | Confirm an email address from the link token — `{ token }` |
 | `POST /auth/resend-verification` | Re-send the verification link (auth required) |
 | `POST /auth/change-password` | Signed-in password change - `{ currentPassword, newPassword }` (auth required, 3/min per account) |
-| `GET /users/me` | Current user's profile + placement + projects (needs `Authorization: Bearer <token>`) |
+| `GET /users/me` | Current user's profile + placement + projects, plus `isAdmin` and `emailGateActive` (needs `Authorization: Bearer <token>`) |
 | `PATCH /users/me` | Update fullName/school/department/moduleChoice |
 | `POST /it-placement` | Set up (or edit) the IT placement — generates the full holiday-aware attendance calendar in one call |
 | `GET /it-placement/me` | Fetch placement + generated calendar, plus a `trial` summary (`total`/`used`/`remaining`/`spent`) for the free AI week |
