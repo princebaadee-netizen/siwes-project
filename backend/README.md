@@ -104,6 +104,7 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 | `POST /auth/reset-password` | Set a new password from a reset token — `{ token, password }` |
 | `POST /auth/verify-email` | Confirm an email address from the link token — `{ token }` |
 | `POST /auth/resend-verification` | Re-send the verification link (auth required) |
+| `POST /auth/change-password` | Signed-in password change - `{ currentPassword, newPassword }` (auth required, 3/min per account) |
 | `GET /users/me` | Current user's profile + placement + projects (needs `Authorization: Bearer <token>`) |
 | `PATCH /users/me` | Update fullName/school/department/moduleChoice |
 | `POST /it-placement` | Set up (or edit) the IT placement — generates the full holiday-aware attendance calendar in one call |
@@ -122,6 +123,10 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 | `POST /admin/topics` | Admin-only: add a topic — `{ title, field, description? }` |
 | `PATCH /admin/topics/:id` | Admin-only: edit a topic (only provided fields change) |
 | `DELETE /admin/topics/:id` | Admin-only: remove a topic (projects keep their own copy of the title) |
+| `GET /admin/holidays` | Admin-only: list the federal public-holiday list (grouped by year in the UI) |
+| `POST /admin/holidays` | Admin-only: add a holiday - `{ date, name }` (duplicate date+name → 409) |
+| `PATCH /admin/holidays/:id` | Admin-only: edit a holiday; the year is recomputed from the date |
+| `DELETE /admin/holidays/:id` | Admin-only: remove a holiday (calendars already generated keep their copy) |
 | `POST /projects` | Create a project — auto-creates all 5 chapters, Chapter 1 pre-marked free. Accepts `topicSource` (`MANUAL`/`BANK`/`AI_SUGGESTED`) |
 | `POST /projects/suggest-topics` | AI-suggest up to 5 project topics from `{ field?, interests? }` → `{ field, topics }` (falls back to the student's department; per-account rate-limited) |
 | `GET /projects` | List the student's projects |
@@ -162,7 +167,7 @@ Prices are read at call time from env (`pricing.ts`, in naira) so fees can be ra
 - **Citation verification** (`reference-verifier.ts`): a DOI is looked up in Crossref, then DataCite; an ISBN in Open Library; a bare URL is only reachability-checked. Results are stored with a tier — `API_VERIFIED`, `LINK_CHECKED`, or `STUDENT_CONFIRMED` — so a citation is never silently marked verified.
 - **Money stored in kobo** (`amountKobo` on `Purchase`) to avoid floating-point currency bugs.
 - **Topic bank** (`topics.service.ts`): a seeded, admin-maintained catalogue of project topics (`ProjectTopic`) that students can browse by field and pick from instead of inventing one. `create-project` records the `topicSource` so a topic's origin is never ambiguous. A student can also ask the AI for tailored suggestions (`projects.service.ts#suggestTopics`), recorded under the `TOPIC_SUGGESTION` generation type.
-- **Admin topic management** (`topics-admin.controller.ts`): the CRUD routes above sit behind `JwtAuthGuard` + `AdminGuard` (`src/auth/admin.guard.ts`). Admins are chosen by the comma-separated `ADMIN_EMAILS` env allowlist rather than a role column — an admin signs in like anyone else, and the client learns they're an admin from `isAdmin` on `GET /users/me` (purely showing the UI; the guard is the real enforcement). An unset allowlist switches the admin API off entirely.
+- **Admin topic management** (`topics-admin.controller.ts`): the CRUD routes above sit behind `JwtAuthGuard` + `AdminGuard` (`src/auth/admin.guard.ts`). Admins are chosen by the comma-separated `ADMIN_EMAILS` env allowlist rather than a role column — an admin signs in like anyone else, and the client learns they're an admin from `isAdmin` on `GET /users/me` (purely showing the UI; the guard is the real enforcement). An unset allowlist switches the admin API off entirely. The `/admin/holidays` routes (`holidays-admin.controller.ts`) use the exact same guards: the seed ships the federal list for 2026 and 2027 with the Eid dates marked as estimates, and an admin corrects them to the officially announced dates when the FG declares them.
 - **Admin paywall bypass**: admin accounts also skip the paid gates so the paid AI flows can be exercised without a purchase — `logbook.service.ts#hasPass` and `projects.service.ts#hasPass` treat an `ADMIN_EMAILS` user as owning both passes, and `regenerateChapter` ignores the per-chapter regeneration cap for them. This is independent of `AI_DEV_UNLOCK` (which unlocks *every* account and is dev-only); the bypass is per-admin, so real students still pay. The frontend mirrors it, folding `isAdmin` into the "owned passes" state on the Account, Logbook and Project pages.
 
 ## Report & PDF export

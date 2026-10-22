@@ -71,7 +71,8 @@ This builds the API from `backend/Dockerfile`, starts Postgres, and runs `prisma
   - **IT/SIWES**: day-by-day logbook CRUD (edit or delete any entry) with per-entry review status (Draft → Reviewed → Finalized), the "did you work these public holidays?" confirmation question, AI bulk fill-up (draft entries from a plain-text description; first 7 days free), **AI single-day polish** (turn a rough note into a proper entry before saving), a live **free-trial indicator** (days left, or a nudge to buy the pass once it's spent), and **Print / Save as PDF** for a clean logbook with a cover page. Editing your placement rebuilds the calendar in place, keeping entries on days that are still on your attendance pattern.
   - **Project**: the real project/chapters, mark complete / reopen for revisions, per-chapter AI drafting (Chapter 1 free, the rest need the Project Pass) with a bounded number of **regenerations** per chapter, a **references list with citation verification** (Crossref/DataCite/Open Library, else link-check), and **Print / Save as PDF** for the chapters. When creating a project you can type your own topic, pick one from the **topic bank** — a filterable catalogue of curated topics (by field) — or let **AI suggest topics** tailored to your field/interests. Where the topic came from is recorded either way. Admins can curate the bank (add/edit/remove) from a **Topic bank** page, gated by the API's `ADMIN_EMAILS` allowlist.
   - **Report**: the AI-written IT/SIWES report (the IT/SIWES Pass gates generation). It assembles a **cover & title page** from editable details (institution, faculty/department, programme, level, matric no., supervisors, duration, submission date, and an optional uploaded logo or ready-made cover image), then writes the prose sections — Abstract, Dedication, Acknowledgment and Chapters 1–4 (Introduction, Industrial Experience, Skills Acquired, Discussion and Conclusion) — from your placement, logbook and project, one section per request to stay within the AI rate limit. Each section can be edited by hand and marked **Draft → Reviewed → Finalized**, rewritten with AI (bounded regenerations, with optional guidance), or all blank sections written at once. Export a print-ready **PDF** or an editable **Word (.docx)**. Reading/editing is free; only AI writing needs the pass.
-  - **Account**: saves profile, module choice and IT placement for real, sells the two passes (or a bundle that unlocks both) through Paystack (instant dev-mode grant when no keys are set), and shows an **AI usage** summary (generations, tokens and estimated cost, broken down by generation type).
+  - **Account**: saves profile, module choice and IT placement for real, sells the two passes (or a bundle that unlocks both) through Paystack (instant dev-mode grant when no keys are set), shows an **AI usage** summary (generations, tokens and estimated cost, broken down by generation type), and lets a signed-in student **change their password** (current password required, rate-limited).
+  - **Admin**: two admin pages behind the API's `ADMIN_EMAILS` allowlist — the **Topic bank** (curate the project-topic catalogue) and **Public holidays** (add/edit/remove the federal holiday list the attendance calendar is generated from; the seed ships 2026 and 2027 with the Eid dates marked as estimates, so an admin can correct them once the FG announces the real dates).
 
 ## Design system
 
@@ -96,6 +97,9 @@ app/
     project/page.tsx
     report/page.tsx        — AI-written SIWES report: cover details, per-section generation/editing, PDF & DOCX export
     account/page.tsx
+    admin/
+      topics/page.tsx     — admin CRUD over the project-topic bank
+      holidays/page.tsx   — admin CRUD over the federal public-holiday list
 components/
   ui.tsx
   attendance-picker.tsx
