@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutGrid, BookText, FileText, GraduationCap, User, LogOut, MailWarning, ShieldCheck } from "lucide-react";
+import { LayoutGrid, BookText, FileText, GraduationCap, User, LogOut, MailWarning, ShieldCheck, CalendarDays } from "lucide-react";
 import { ReactNode, useEffect, useState } from "react";
 import { api, clearToken, getToken } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
@@ -69,7 +69,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   if (!hydrated || !authorised) return null;
 
   const navTabs = isAdmin
-    ? [...tabs, { href: "/dashboard/admin/topics", label: "Topic bank", icon: ShieldCheck }]
+    ? [
+        ...tabs,
+        { href: "/dashboard/admin/topics", label: "Topic bank", icon: ShieldCheck },
+        { href: "/dashboard/admin/holidays", label: "Holidays", icon: CalendarDays },
+      ]
     : tabs;
 
   return (

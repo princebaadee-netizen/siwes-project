@@ -10,6 +10,7 @@ import { ItPlacementModule } from './it-placement/it-placement.module';
 import { LogbookModule } from './logbook/logbook.module';
 import { ProjectsModule } from './projects/projects.module';
 import { TopicsModule } from './topics/topics.module';
+import { HolidaysModule } from './holidays/holidays.module';
 import { UsageModule } from './usage/usage.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ReportModule } from './report/report.module';
@@ -38,6 +39,7 @@ import { RedisThrottlerModule } from './common/redis-throttler.module';
     LogbookModule,
     ProjectsModule,
     TopicsModule,
+    HolidaysModule,
     UsageModule,
     PaymentsModule,
     ReportModule,

@@ -23,6 +23,24 @@ const HOLIDAYS_2026 = [
 ];
 
 /**
+ * 2027 additions — same rules as above: fixed dates are exact, Eid dates are
+ * estimates pending the official announcement (Nigeria's FG usually declares
+ * them a day or two before).
+ */
+const HOLIDAYS_2027 = [
+  { date: '2027-01-01', name: "New Year's Day" },
+  { date: '2027-03-10', name: 'Eid al-Fitr (estimated — confirm date)' },
+  { date: '2027-03-26', name: 'Good Friday' },
+  { date: '2027-03-29', name: 'Easter Monday' },
+  { date: '2027-05-01', name: "Workers' Day" },
+  { date: '2027-05-17', name: 'Eid al-Adha (estimated — confirm date)' },
+  { date: '2027-06-12', name: 'Democracy Day' },
+  { date: '2027-10-01', name: 'Independence Day' },
+  { date: '2027-12-25', name: 'Christmas Day' },
+  { date: '2027-12-26', name: 'Boxing Day' },
+];
+
+/**
  * A starter topic bank. Like the holiday list this is admin-maintained: add or
  * retire rows over time rather than treating it as fixed. Upserting by title
  * means re-running the seed is safe and won't duplicate or clobber edits to
@@ -162,15 +180,16 @@ const TOPICS = [
 ];
 
 async function main() {
-  for (const h of HOLIDAYS_2026) {
+  const allHolidays = [...HOLIDAYS_2026, ...HOLIDAYS_2027];
+  for (const h of allHolidays) {
     const date = new Date(h.date);
     await prisma.publicHoliday.upsert({
       where: { date_name: { date, name: h.name } },
       update: {},
-      create: { date, name: h.name, year: date.getFullYear() },
+      create: { date, name: h.name, year: date.getUTCFullYear() },
     });
   }
-  console.log(`Seeded ${HOLIDAYS_2026.length} holidays for 2026.`);
+  console.log(`Seeded ${allHolidays.length} holidays for 2026 and 2027.`);
 
   for (const topic of TOPICS) {
     await prisma.projectTopic.upsert({

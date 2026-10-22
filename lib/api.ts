@@ -78,6 +78,13 @@ export interface SuggestedTopic {
   description: string;
 }
 
+export interface PublicHoliday {
+  id: string;
+  date: string;
+  name: string;
+  year: number;
+}
+
 export type GenerationType =
   | "EXTRACTION"
   | "BULK_LOGBOOK"
@@ -375,6 +382,23 @@ export const api = {
 
   deleteTopic: (id: string) =>
     request<{ ok: boolean }>(`/admin/topics/${id}`, { method: "DELETE" }),
+
+  adminListHolidays: () => request<PublicHoliday[]>("/admin/holidays"),
+
+  createHoliday: (data: { date: string; name: string }) =>
+    request<PublicHoliday>("/admin/holidays", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateHoliday: (id: string, data: { date?: string; name?: string }) =>
+    request<PublicHoliday>(`/admin/holidays/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteHoliday: (id: string) =>
+    request<{ ok: boolean }>(`/admin/holidays/${id}`, { method: "DELETE" }),
 
   suggestTopics: (params?: { field?: string; interests?: string }) =>
     request<{ field: string; topics: SuggestedTopic[] }>("/projects/suggest-topics", {
