@@ -72,6 +72,27 @@ export class AuthService {
     return this.buildAuthResponse(user);
   }
 
+  /**
+   * Signed-in password change. A wrong current password is a 400, not a 401 —
+   * the frontend treats 401 as an expired session and would log the student
+   * out mid-form for a simple typo.
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+
+    const passwordValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!passwordValid) {
+      throw new BadRequestException('Your current password is incorrect.');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+    return { ok: true };
+  }
+
   async requestPasswordReset(emailRaw: string) {
     const email = emailRaw.trim().toLowerCase();
 

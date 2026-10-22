@@ -8,6 +8,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -48,5 +49,14 @@ export class AuthController {
   @Post('resend-verification')
   resendVerification(@CurrentUserId() userId: string) {
     return this.authService.resendVerification(userId);
+  }
+
+  // Authenticated, and tightly throttled — this is a brute-force surface
+  // against the current password.
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @Post('change-password')
+  changePassword(@CurrentUserId() userId: string, @Body() dto: ChangePasswordDto) {
+    return this.authService.changePassword(userId, dto.currentPassword, dto.newPassword);
   }
 }

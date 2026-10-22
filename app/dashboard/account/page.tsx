@@ -66,6 +66,10 @@ export default function AccountPage() {
   const [school, setSchool] = useState("");
   const [department, setDepartment] = useState("");
 
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
   // Module
   const [moduleChoice, setModuleChoice] = useState<BackendModule | null>(null);
 
@@ -271,6 +275,35 @@ export default function AccountPage() {
     }
   }
 
+  async function changePassword() {
+    if (!currentPassword) {
+      setError("Enter your current password.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError("The new password needs at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("The new passwords don't match.");
+      return;
+    }
+    setSaving("password");
+    setError(null);
+    setSuccess(null);
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      flash("Password changed.");
+    } catch (err: any) {
+      if (!handleAuthFailure(err)) setError(err?.message || "Could not change your password.");
+    } finally {
+      setSaving(null);
+    }
+  }
+
   async function saveModule() {
     if (!moduleChoice) return;
     setSaving("module");
@@ -463,9 +496,54 @@ export default function AccountPage() {
       </Card>
 
       <Card className="space-y-4">
-        <h2 className="font-medium text-ink">What you're using</h2>
+        <div>
+          <h2 className="font-medium text-ink">Change password</h2>
+          <p className="mt-1 text-sm text-ink/60">
+            Enter your current password to confirm it&apos;s you.
+          </p>
+        </div>
+        <div>
+          <FieldLabel>Current password</FieldLabel>
+          <TextInput
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            placeholder="Your current password"
+          />
+        </div>
+        <div>
+          <FieldLabel>New password</FieldLabel>
+          <TextInput
+            type="password"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="At least 8 characters"
+          />
+        </div>
+        <div>
+          <FieldLabel>Confirm new password</FieldLabel>
+          <TextInput
+            type="password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Repeat the new password"
+          />
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={changePassword} disabled={saving === "password"}>
+            {saving === "password" && <Loader2 size={15} className="animate-spin" />}
+            {saving === "password" ? "Changing..." : "Change password"}
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="space-y-4">
+        <h2 className="font-medium text-ink">What you&apos;re using</h2>
         <p className="text-sm text-ink/60">
-          Switching modules keeps everything you've already created.
+          Switching modules keeps everything you&apos;ve already created.
         </p>
         <div className="space-y-3">
           {MODULE_OPTIONS.map((opt) => (
@@ -730,7 +808,7 @@ export default function AccountPage() {
               </div>
 
               <div>
-                <FieldLabel>Supervisor's name (optional)</FieldLabel>
+                <FieldLabel>Supervisor&apos;s name (optional)</FieldLabel>
                 <TextInput
                   value={supervisorName}
                   onChange={(e) => setSupervisorName(e.target.value)}
@@ -791,7 +869,7 @@ export default function AccountPage() {
           <div>
             <h2 className="font-medium text-ink">AI usage</h2>
             <p className="mt-1 text-sm text-ink/60">
-              How much AI drafting you've used, with an estimated cost.
+              How much AI drafting you&apos;ve used, with an estimated cost.
             </p>
           </div>
 

@@ -216,4 +216,39 @@ describe('AuthService password reset', () => {
       expect(url.startsWith('http://localhost:3000/verify-email?token=')).toBe(true);
     });
   });
+
+  describe('changePassword', () => {
+    const passwordHash = bcrypt.hashSync('old-password-1', 4);
+
+    it('rejects a wrong current password as a 400, without touching the hash', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', passwordHash });
+
+      await expect(service.changePassword('u1', 'not-the-password', 'brand-new-pass')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('replaces the hash when the current password is right', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', passwordHash });
+      prisma.user.update.mockResolvedValue({ id: 'u1' });
+
+      const res = await service.changePassword('u1', 'old-password-1', 'brand-new-pass');
+
+      expect(res).toEqual({ ok: true });
+      const stored = prisma.user.update.mock.calls[0][0].data.passwordHash;
+      expect(stored).not.toBe('brand-new-pass');
+      expect(await bcrypt.compare('brand-new-pass', stored)).toBe(true);
+      // The old password no longer works.
+      expect(await bcrypt.compare('old-password-1', stored)).toBe(false);
+    });
+
+    it('throws when the account no longer exists', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.changePassword('u1', 'any', 'brand-new-pass')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+  });
 });

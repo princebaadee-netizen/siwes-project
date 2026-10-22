@@ -280,6 +280,12 @@ export const api = {
       method: "POST",
     }),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ ok: boolean }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
   getMe: () => request<any>("/users/me"),
 
   updateMe: (data: { fullName?: string; school?: string; department?: string; moduleChoice?: "LOGBOOK" | "PROJECT" | "BOTH" }) =>
